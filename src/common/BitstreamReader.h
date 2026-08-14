@@ -14,6 +14,7 @@ public:
   uint32_t showBits(std::size_t num);
   uint32_t getGolombU();
   int32_t getGolombS();
+  void byteAlign();
 
   std::size_t available();
   std::size_t availableInNalU();

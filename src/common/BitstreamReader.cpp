@@ -3,9 +3,6 @@
 #include <climits>
 #include <stdexcept>
 #include <cassert>
-//#include <boost/config/no_tr1/complex.hpp>
-
-#include "HevcUtils.h"
 
 BitstreamReader::BitstreamReader(const uint8_t *ptr, std::size_t size):
   m_ptr(ptr)
@@ -161,5 +158,12 @@ int32_t BitstreamReader::getGolombS()
     buf = -(buf >> 1);
 
   return buf;
+}
+
+
+void BitstreamReader::byteAlign()
+{
+  while(m_posInBase != CHAR_BIT - 1)
+    getBit();
 }
 

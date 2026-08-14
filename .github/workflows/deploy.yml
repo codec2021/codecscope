@@ -35,12 +35,12 @@ jobs:
         run: |
           source "$HOME/emsdk/emsdk_env.sh"
           mkdir -p dist
-          em++ src/hevcparser/src/*.cpp src/common/*.cpp src/web/*.cpp \
-            -Isrc/hevcparser/include -Isrc/hevcparser/src -Isrc/common -Isrc/web \
+          em++ src/hevcparser/src/*.cpp src/h264parser/src/*.cpp src/vvcparser/src/*.cpp src/common/*.cpp src/web/*.cpp \
+            -Isrc/hevcparser/include -Isrc/hevcparser/src -Isrc/h264parser/include -Isrc/h264parser/src -Isrc/vvcparser/include -Isrc/vvcparser/src -Isrc/common -Isrc/web \
             -std=c++11 -O2 \
             -s WASM=1 \
             -s ALLOW_MEMORY_GROWTH=1 \
-            -s EXPORTED_FUNCTIONS='["_hevc_parse","_hevc_get_nal_syntax","_hevc_reset","_hevc_free","_malloc","_free"]' \
+            -s EXPORTED_FUNCTIONS='["_hevc_parse","_hevc_get_nal_syntax","_hevc_reset","_avc_parse","_avc_get_nal_syntax","_avc_reset","_vvc_parse","_vvc_get_nal_syntax","_vvc_reset","_detect_codec","_hevc_free","_malloc","_free"]' \
             -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","lengthBytesUTF8","HEAPU8"]' \
             -s MODULARIZE=1 \
             -s EXPORT_NAME=createHevcModule \

@@ -151,6 +151,17 @@ namespace web
     m_totalSize = size;
   }
 
+  int WebParser::calcSliceQp(std::shared_ptr<HEVC::Slice> pSlice)
+  {
+    if(!pSlice)
+      return -1;
+    int qp = 26 + pSlice -> slice_qp_delta;
+    auto it = m_ppsMap.find(pSlice -> slice_pic_parameter_set_id);
+    if(it != m_ppsMap.end() && it->second)
+      qp += it->second -> init_qp_minus26;
+    return qp;
+  }
+
   void WebParser::onNALUnit(std::shared_ptr<HEVC::NALUnit> pNALUnit, const HEVC::Parser::Info *pInfo)
   {
     NALUEntry e;
@@ -158,6 +169,11 @@ namespace web
     e.length = 0;
     e.type = (uint32_t)pNALUnit -> m_nalHeader.type;
     e.typeName = ConvToString::NALUnitType(pNALUnit -> m_nalHeader.type);
+    e.sliceType = -1;
+    e.sliceQp = -1;
+    e.slicePoc = -1;
+    e.sliceAddr = -1;
+    e.firstSlice = -1;
     e.nal = pNALUnit;
 
     m_nalusNumber++;
@@ -205,8 +221,14 @@ namespace web
       case NAL_IDR_W_RADL:
       case NAL_IDR_N_LP:
       {
+        std::shared_ptr<Slice> pSlice = std::dynamic_pointer_cast<Slice>(pNALUnit);
         e.info = "IDR Slice #" + std::to_string(m_frameNum);
         e.color = "red";
+        e.sliceType = 2; // I
+        e.slicePoc = pSlice -> slice_pic_order_cnt_lsb;
+        e.sliceQp = calcSliceQp(pSlice);
+        e.sliceAddr = pSlice -> slice_segment_address;
+        e.firstSlice = pSlice -> first_slice_segment_in_pic_flag;
         m_frameNum++;
         m_INumber++;
         m_prevSliceType = HEVC::Slice::I_SLICE;
@@ -229,10 +251,15 @@ namespace web
       case NAL_CRA_NUT:
       {
         std::shared_ptr<Slice> pSlice = std::dynamic_pointer_cast<Slice>(pNALUnit);
+        e.slicePoc = pSlice -> slice_pic_order_cnt_lsb;
+        e.sliceQp = calcSliceQp(pSlice);
+        e.sliceAddr = pSlice -> slice_segment_address;
+        e.firstSlice = pSlice -> first_slice_segment_in_pic_flag;
 
         if(pSlice -> dependent_slice_segment_flag)
         {
           e.info = "Dependent Slice";
+          e.sliceType = (int)m_prevSliceType; // 复用前一个 slice 类型
           switch(m_prevSliceType)
           {
             case HEVC::Slice::B_SLICE: m_BNumber++; break;
@@ -258,17 +285,20 @@ namespace web
                 e.color = "#EE30A7";
               else
                 e.color = "#FFB90F";
+              e.sliceType = 1; // B
               m_BNumber++;
               break;
             }
             case HEVC::Slice::P_SLICE:
               e.info = "P Slice #" + std::to_string(m_frameNum);
               e.color = "#0000FF";
+              e.sliceType = 0; // P
               m_PNumber++;
               break;
             case HEVC::Slice::I_SLICE:
               e.info = "I Slice #" + std::to_string(m_frameNum);
               e.color = "#CD9B1D";
+              e.sliceType = 2; // I
               m_INumber++;
               break;
             default:
@@ -365,7 +395,13 @@ namespace web
       out += jsonEscape(m_nalus[i].info);
       out += "\",\"color\":\"";
       out += jsonEscape(m_nalus[i].color);
-      out += "\"}";
+      out += "\",\"sliceType\":";
+      out += std::to_string(m_nalus[i].sliceType);
+      out += ",\"sliceQp\":";
+      out += std::to_string(m_nalus[i].sliceQp);
+      out += ",\"slicePoc\":";
+      out += std::to_string(m_nalus[i].slicePoc);
+      out += "}";
     }
     out += "]";
 

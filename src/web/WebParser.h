@@ -22,6 +22,8 @@ namespace web
       void reset();
       void setTotalSize(std::size_t size);
 
+      int calcSliceQp(std::shared_ptr<HEVC::Slice> pSlice);
+
       void onNALUnit(std::shared_ptr<HEVC::NALUnit> pNALUnit, const HEVC::Parser::Info *pInfo) override;
       void onWarning(const std::string &warning, const HEVC::Parser::Info *pInfo, HEVC::Parser::WarningType type) override;
 
@@ -39,6 +41,11 @@ namespace web
         std::string                      typeName;
         std::string                      info;
         std::string                      color;
+        int                              sliceType;   // -1 = 非 slice, 0/1/2 = B/P/I
+        int                              sliceQp;     // -1 = 无效
+        int                              slicePoc;
+        int                              sliceAddr;
+        int                              firstSlice;
         std::shared_ptr<HEVC::NALUnit>   nal;
       };
 

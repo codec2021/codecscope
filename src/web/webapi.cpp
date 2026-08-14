@@ -1,7 +1,12 @@
 #include "WebParser.h"
 #include "ProfileConformanceAnalyzer.h"
+#include "AvcWebParser.h"
+#include "VvcWebParser.h"
+#include "CodecDetector.h"
 
 #include <HevcParser.h>
+#include <AvcParser.h>
+#include <VvcParser.h>
 
 #include <cstring>
 #include <cstdlib>
@@ -20,6 +25,12 @@ namespace
   web::ProfileConformanceAnalyzer *g_profileAnalyzer = nullptr;
   HEVC::Parser                    *g_parser = nullptr;
 
+  web::AvcWebParser               *g_avcWebParser = nullptr;
+  AVC::Parser                     *g_avcParser = nullptr;
+
+  web::VvcWebParser               *g_vvcWebParser = nullptr;
+  VVC::Parser                     *g_vvcParser = nullptr;
+
   char *dupString(const std::string &s)
   {
     char *out = (char *)malloc(s.size() + 1);
@@ -35,8 +46,16 @@ extern "C"
 {
 
   HEVC_KEEPALIVE void hevc_reset();
+  HEVC_KEEPALIVE void avc_reset();
+  HEVC_KEEPALIVE void vvc_reset();
 
-  // 解析原始 HEVC 基本流，返回汇总 JSON（NAL 列表 + 流信息 + HDR + 警告）
+  // 检测码流类型：返回 "hevc" / "avc" / "vvc" / "unknown"
+  HEVC_KEEPALIVE char *detect_codec(const uint8_t *data, std::size_t size)
+  {
+    return dupString(web::detectCodec(data, size));
+  }
+
+  // ---------- HEVC ----------
   HEVC_KEEPALIVE char *hevc_parse(const uint8_t *data, std::size_t size)
   {
     hevc_reset();
@@ -56,7 +75,6 @@ extern "C"
     return dupString(g_webParser -> serializeSummary());
   }
 
-  // 返回第 index 个 NAL 单元的语法树 JSON
   HEVC_KEEPALIVE char *hevc_get_nal_syntax(std::size_t index)
   {
     if(!g_webParser)
@@ -64,7 +82,6 @@ extern "C"
     return dupString(g_webParser -> serializeNalSyntax(index));
   }
 
-  // 释放上一次解析占用的资源
   HEVC_KEEPALIVE void hevc_reset()
   {
     if(g_parser)
@@ -78,7 +95,73 @@ extern "C"
     g_profileAnalyzer = nullptr;
   }
 
-  // 释放由上面接口返回的字符串内存
+  // ---------- H.264/AVC ----------
+  HEVC_KEEPALIVE char *avc_parse(const uint8_t *data, std::size_t size)
+  {
+    avc_reset();
+
+    g_avcParser = AVC::Parser::create();
+    g_avcWebParser = new web::AvcWebParser();
+    g_avcWebParser -> setTotalSize(size);
+
+    g_avcParser -> addConsumer(g_avcWebParser);
+    g_avcParser -> process(data, size);
+
+    return dupString(g_avcWebParser -> serializeSummary());
+  }
+
+  HEVC_KEEPALIVE char *avc_get_nal_syntax(std::size_t index)
+  {
+    if(!g_avcWebParser)
+      return dupString("{\"n\":\"No data parsed\"}");
+    return dupString(g_avcWebParser -> serializeNalSyntax(index));
+  }
+
+  HEVC_KEEPALIVE void avc_reset()
+  {
+    if(g_avcParser)
+    {
+      AVC::Parser::release(g_avcParser);
+      g_avcParser = nullptr;
+    }
+    delete g_avcWebParser;
+    g_avcWebParser = nullptr;
+  }
+
+  // ---------- H.266/VVC ----------
+  HEVC_KEEPALIVE char *vvc_parse(const uint8_t *data, std::size_t size)
+  {
+    vvc_reset();
+
+    g_vvcParser = VVC::Parser::create();
+    g_vvcWebParser = new web::VvcWebParser();
+    g_vvcWebParser -> setTotalSize(size);
+
+    g_vvcParser -> addConsumer(g_vvcWebParser);
+    g_vvcParser -> process(data, size);
+
+    return dupString(g_vvcWebParser -> serializeSummary());
+  }
+
+  HEVC_KEEPALIVE char *vvc_get_nal_syntax(std::size_t index)
+  {
+    if(!g_vvcWebParser)
+      return dupString("{\"n\":\"No data parsed\"}");
+    return dupString(g_vvcWebParser -> serializeNalSyntax(index));
+  }
+
+  HEVC_KEEPALIVE void vvc_reset()
+  {
+    if(g_vvcParser)
+    {
+      VVC::Parser::release(g_vvcParser);
+      g_vvcParser = nullptr;
+    }
+    delete g_vvcWebParser;
+    g_vvcWebParser = nullptr;
+  }
+
+  // ---------- 通用 ----------
   HEVC_KEEPALIVE void hevc_free(void *ptr)
   {
     free(ptr);

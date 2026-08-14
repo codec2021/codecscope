@@ -3,44 +3,59 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HEVCESBrowser Web - HEVC(H.265) 码流分析</title>
+  <title>H26xBrowser - H.264/H.265/H.266 码流分析</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <h1>HEVCESBrowser <span class="accent">Web</span></h1>
+    <h1>H26x<span class="accent">Browser</span></h1>
     <div class="header-actions">
+      <span id="codecBadge" class="codec-badge hidden"></span>
       <button id="openBtn" class="btn">打开文件</button>
-      <input type="file" id="fileInput" hidden accept=".h265,.hevc,.265,.bin,.hm10,.bit">
+      <input type="file" id="fileInput" hidden accept=".h264,.h265,.hevc,.h266,.vvc,.266,.265,.264,.avc,.bin,.bit">
       <span id="fileName" class="file-name">未加载文件</span>
     </div>
   </header>
 
   <div id="dropzone" class="dropzone">
     <div class="dropzone-inner">
-      <p>将 <strong>.h265 / .hevc</strong> 裸码流文件拖放到此处</p>
-      <p class="hint">HEVC 基本流（ES）文件。若为 mp4/ts 封装，请先用 ffmpeg 解封装：<br><code>ffmpeg -i input.mp4 -vcodec copy -an video.h265</code></p>
+      <p>将 <strong>.h264 / .h265 / .h266</strong> 裸码流文件拖放到此处</p>
+      <p class="hint">支持 H.264(AVC) / H.265(HEVC) / H.266(VVC)。若为 mp4/ts 封装，请先用 ffmpeg 解封装：<br><code>ffmpeg -i input.mp4 -vcodec copy -an video.h265</code></p>
     </div>
   </div>
 
   <section id="statsBar" class="stats-bar hidden"></section>
 
+  <section id="timelinePanel" class="timeline-panel hidden">
+    <div class="panel-title">帧结构 (Slice 类型时间轴) <span id="timelineLegend" class="legend"></span></div>
+    <div class="timeline-wrap"><canvas id="timeline" class="timeline"></canvas></div>
+  </section>
+
   <main id="mainArea" class="main-area hidden">
     <section class="panel nal-panel">
       <div class="panel-title">NAL 单元列表 <span id="nalCount" class="count"></span></div>
-      <div class="table-wrap">
-        <table id="nalTable">
-          <thead>
-            <tr><th>Offset</th><th>Length</th><th>类型</th><th>信息</th></tr>
-          </thead>
-          <tbody id="nalBody"></tbody>
-        </table>
+      <div id="nalScroll" class="nal-scroll">
+        <div id="nalSpacer"></div>
+        <div id="nalRows"></div>
+      </div>
+      <div id="nalHeaderRow" class="nal-header">
+        <span class="c-offset">Offset</span>
+        <span class="c-length">Length</span>
+        <span class="c-type">类型</span>
+        <span class="c-info">信息</span>
       </div>
     </section>
 
     <section class="panel syntax-panel">
-      <div class="panel-title">语法元素 <span id="syntaxTitle" class="count"></span></div>
+      <div class="panel-title">
+        语法元素 <span id="syntaxTitle" class="count"></span>
+        <div class="tab-group">
+          <button id="tabSyntax" class="tab active">语法树</button>
+          <button id="tabHex" class="tab">Hex 视图</button>
+        </div>
+      </div>
       <div id="syntaxTree" class="syntax-tree"></div>
+      <div id="hexView" class="hex-view hidden"></div>
     </section>
   </main>
 
