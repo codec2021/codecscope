@@ -1,0 +1,10 @@
+# 编译产物
+*.o
+hevcparser_native
+dist/
+
+# 系统文件
+.DS_Store
+
+# 本地 emsdk（可选，如放在项目内）
+emsdk/

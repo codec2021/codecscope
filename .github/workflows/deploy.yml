@@ -1,0 +1,61 @@
+name: Build and Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          cd "$HOME/emsdk"
+          ./emsdk install latest
+          ./emsdk activate latest
+
+      - name: Build WASM
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          mkdir -p dist
+          em++ src/hevcparser/src/*.cpp src/common/*.cpp src/web/*.cpp \
+            -Isrc/hevcparser/include -Isrc/hevcparser/src -Isrc/common -Isrc/web \
+            -std=c++11 -O2 \
+            -s WASM=1 \
+            -s ALLOW_MEMORY_GROWTH=1 \
+            -s EXPORTED_FUNCTIONS='["_hevc_parse","_hevc_get_nal_syntax","_hevc_reset","_hevc_free","_malloc","_free"]' \
+            -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","lengthBytesUTF8","HEAPU8"]' \
+            -s MODULARIZE=1 \
+            -s EXPORT_NAME=createHevcModule \
+            -o dist/hevc.js
+          cp -r www/index.html www/css www/js dist/
+          ls -la dist
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HEVCESBrowser Web - HEVC(H.265) 码流分析</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>HEVCESBrowser <span class="accent">Web</span></h1>
+    <div class="header-actions">
+      <button id="openBtn" class="btn">打开文件</button>
+      <input type="file" id="fileInput" hidden accept=".h265,.hevc,.265,.bin,.hm10,.bit">
+      <span id="fileName" class="file-name">未加载文件</span>
+    </div>
+  </header>
+
+  <div id="dropzone" class="dropzone">
+    <div class="dropzone-inner">
+      <p>将 <strong>.h265 / .hevc</strong> 裸码流文件拖放到此处</p>
+      <p class="hint">HEVC 基本流（ES）文件。若为 mp4/ts 封装，请先用 ffmpeg 解封装：<br><code>ffmpeg -i input.mp4 -vcodec copy -an video.h265</code></p>
+    </div>
+  </div>
+
+  <section id="statsBar" class="stats-bar hidden"></section>
+
+  <main id="mainArea" class="main-area hidden">
+    <section class="panel nal-panel">
+      <div class="panel-title">NAL 单元列表 <span id="nalCount" class="count"></span></div>
+      <div class="table-wrap">
+        <table id="nalTable">
+          <thead>
+            <tr><th>Offset</th><th>Length</th><th>类型</th><th>信息</th></tr>
+          </thead>
+          <tbody id="nalBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel syntax-panel">
+      <div class="panel-title">语法元素 <span id="syntaxTitle" class="count"></span></div>
+      <div id="syntaxTree" class="syntax-tree"></div>
+    </section>
+  </main>
+
+  <section id="bottomPanels" class="bottom-panels hidden">
+    <section class="panel hdr-panel">
+      <div class="panel-title">HDR / 色彩信息</div>
+      <div id="hdrInfo" class="kv-list"></div>
+    </section>
+
+    <section class="panel warning-panel">
+      <div class="panel-title">
+        警告 <span id="warningCount" class="count"></span>
+        <select id="warningFilter" class="filter">
+          <option value="-1">全部</option>
+          <option value="1">数值越界</option>
+          <option value="2">引用结构不存在</option>
+          <option value="3">Profile 一致性</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="warningTable">
+          <thead><tr><th>Offset</th><th>消息</th></tr></thead>
+          <tbody id="warningBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <footer class="statusbar">
+    <span id="status">正在加载解析模块…</span>
+  </footer>
+
+  <script src="hevc.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
