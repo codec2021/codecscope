@@ -74,8 +74,8 @@ namespace VVC
     sps_log2_max_pic_order_cnt_lsb_minus4 = 0;
     sps_poc_msb_cycle_flag = 0;
     sps_poc_msb_cycle_len_minus1 = 0;
-    sps_num_extra_ph_bits_bytes = 0;
-    sps_num_extra_sh_bits = 0;
+    sps_num_extra_ph_bytes = 0;
+    sps_num_extra_sh_bytes = 0;
     sps_sublayer_dpb_params_flag = 0;
     sps_log2_min_luma_coding_block_size_minus2 = 0;
     sps_partition_constraints_override_enabled_flag = 0;

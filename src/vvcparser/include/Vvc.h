@@ -11,32 +11,32 @@ namespace VVC
 
   enum NALUnitType
   {
-    NAL_TRAIL_N     = 0,
-    NAL_TRAIL_R     = 1,
-    NAL_STSA_N      = 2,
-    NAL_STSA_R      = 3,
-    NAL_RADL_N      = 4,
-    NAL_RADL_R      = 5,
-    NAL_RASL_N      = 6,
-    NAL_RASL_R      = 7,
-    NAL_IDR_W_RADL  = 8,
-    NAL_IDR_N_LP    = 9,
-    NAL_CRA_NUT     = 10,
-    NAL_GDR_NUT     = 11,
-    NAL_OPI         = 12,
-    NAL_DCI         = 13,
-    NAL_VPS         = 14,
-    NAL_SPS         = 15,
-    NAL_PPS         = 16,
-    NAL_PREFIX_APS  = 17,
-    NAL_SUFFIX_APS  = 18,
-    NAL_PH          = 19,
-    NAL_AUD         = 20,
-    NAL_EOS_NUT     = 21,
-    NAL_EOB_NUT     = 22,
-    NAL_PREFIX_SEI  = 23,
-    NAL_SUFFIX_SEI  = 24,
-    NAL_FD_NUT      = 25,
+    NAL_TRAIL_NUT    = 0,
+    NAL_STSA_NUT     = 1,
+    NAL_RADL_NUT     = 2,
+    NAL_RASL_NUT     = 3,
+    NAL_RSV_VCL_4    = 4,
+    NAL_RSV_VCL_5    = 5,
+    NAL_RSV_VCL_6    = 6,
+    NAL_IDR_W_RADL   = 7,
+    NAL_IDR_N_LP     = 8,
+    NAL_CRA_NUT      = 9,
+    NAL_GDR_NUT      = 10,
+    NAL_RSV_IRAP_11  = 11,
+    NAL_OPI          = 12,
+    NAL_DCI          = 13,
+    NAL_VPS          = 14,
+    NAL_SPS          = 15,
+    NAL_PPS          = 16,
+    NAL_PREFIX_APS   = 17,
+    NAL_SUFFIX_APS   = 18,
+    NAL_PH           = 19,
+    NAL_AUD          = 20,
+    NAL_EOS_NUT      = 21,
+    NAL_EOB_NUT      = 22,
+    NAL_PREFIX_SEI   = 23,
+    NAL_SUFFIX_SEI   = 24,
+    NAL_FD_NUT       = 25,
   };
 
   class NALHeader
@@ -125,8 +125,8 @@ namespace VVC
     uint8_t  sps_log2_max_pic_order_cnt_lsb_minus4;
     uint8_t  sps_poc_msb_cycle_flag;
     uint32_t sps_poc_msb_cycle_len_minus1;
-    uint8_t  sps_num_extra_ph_bits_bytes;
-    uint32_t sps_num_extra_sh_bits;
+    uint8_t  sps_num_extra_ph_bytes;
+    uint8_t  sps_num_extra_sh_bytes;
     uint8_t  sps_sublayer_dpb_params_flag;
     uint8_t  sps_log2_min_luma_coding_block_size_minus2;
     uint8_t  sps_partition_constraints_override_enabled_flag;

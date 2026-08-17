@@ -146,14 +146,10 @@ namespace web
         break;
       }
 
-      case VVC::NAL_TRAIL_N:
-      case VVC::NAL_TRAIL_R:
-      case VVC::NAL_STSA_N:
-      case VVC::NAL_STSA_R:
-      case VVC::NAL_RADL_N:
-      case VVC::NAL_RADL_R:
-      case VVC::NAL_RASL_N:
-      case VVC::NAL_RASL_R:
+      case VVC::NAL_TRAIL_NUT:
+      case VVC::NAL_STSA_NUT:
+      case VVC::NAL_RADL_NUT:
+      case VVC::NAL_RASL_NUT:
       {
         std::shared_ptr<VVC::Slice_NAL> p = std::dynamic_pointer_cast<VVC::Slice_NAL>(pNALUnit);
         e.sliceQp = 26 + p->slice.slice_qp_delta;

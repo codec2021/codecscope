@@ -127,14 +127,10 @@ namespace VVC
         m_lastPH = p;
         break;
       }
-      case NAL_TRAIL_N:
-      case NAL_TRAIL_R:
-      case NAL_STSA_N:
-      case NAL_STSA_R:
-      case NAL_RADL_N:
-      case NAL_RADL_R:
-      case NAL_RASL_N:
-      case NAL_RASL_R:
+      case NAL_TRAIL_NUT:
+      case NAL_STSA_NUT:
+      case NAL_RADL_NUT:
+      case NAL_RASL_NUT:
       case NAL_IDR_W_RADL:
       case NAL_IDR_N_LP:
       case NAL_CRA_NUT:
@@ -204,12 +200,16 @@ namespace VVC
         bool gciPresent = bs.getBit();
         if(gciPresent)
         {
-          const int NUM_GCI_FLAGS = 73;
-          for(int i = 0; i < NUM_GCI_FLAGS; i++)
-            bs.getBit();
-          uint8_t numReserved = bs.getBits(8);
-          for(int i = 0; i < numReserved; i++)
-            bs.getBit();
+          bs.getBit();     // gci_intra_only_constraint_flag
+          bs.getBit();     // gci_all_layers_independent_constraint_flag
+          bs.getBit();     // gci_one_au_only_constraint_flag
+          bs.getBits(4);   // gci_sixteen_minus_max_bitdepth_constraint_idc
+          bs.getBits(2);   // gci_three_minus_max_chroma_format_constraint_idc
+          for(int i = 0; i < 16; i++) bs.getBit(); // no_mixed ... no_subpic_info
+          bs.getBits(2);   // gci_three_minus_max_log2_ctu_size_constraint_idc
+          for(int i = 0; i < 44; i++) bs.getBit(); // no_partition_override ... no_virtual_boundaries
+          uint8_t numReserved = bs.getBits(8);      // gci_num_reserved_constraint_bytes
+          for(int i = 0; i < numReserved; i++) bs.getBits(8);
         }
         bs.byteAlign(); // gci_alignment_zero_bit
       }
@@ -368,11 +368,11 @@ namespace VVC
           if(i < 64) s.sps_loop_filter_across_subpic_enabled_flag[i] = bs.getBit();
         }
       }
-    }
 
-    s.sps_subpic_id_len_minus1 = bs.getGolombU();
-    bs.getBit();     // sps_subpic_id_mapping_explicitly_signalled_flag
-    // 简化：跳过 subpic id mapping（极少使用）
+      s.sps_subpic_id_len_minus1 = bs.getGolombU();
+      bs.getBit();     // sps_subpic_id_mapping_explicitly_signalled_flag
+      // 简化：跳过 subpic id mapping（极少使用）
+    }
 
     s.sps_bitdepth_minus8 = bs.getGolombU();
     s.sps_entropy_coding_sync_enabled_flag = bs.getBit();
@@ -382,8 +382,8 @@ namespace VVC
     if(s.sps_poc_msb_cycle_flag)
       s.sps_poc_msb_cycle_len_minus1 = bs.getGolombU();
 
-    s.sps_num_extra_ph_bits_bytes = bs.getBits(2);
-    s.sps_num_extra_sh_bits = bs.getGolombU();
+    s.sps_num_extra_ph_bytes = bs.getBits(2);
+    s.sps_num_extra_sh_bytes = bs.getBits(2);
 
     if(s.sps_ptl_dpb_hrd_params_present_flag)
     {
@@ -725,6 +725,8 @@ namespace VVC
     ph.ph_inter_slice_allowed_flag = bs.getBit();
     if(ph.ph_inter_slice_allowed_flag)
       ph.ph_intra_slice_allowed_flag = bs.getBit();
+    else
+      ph.ph_intra_slice_allowed_flag = 1; // inter 不允许时隐含为 1
     ph.ph_pic_parameter_set_id = bs.getGolombU();
 
     std::shared_ptr<PPS_NAL> ppps = m_ppsMap[ph.ph_pic_parameter_set_id];
@@ -741,7 +743,7 @@ namespace VVC
       pocBits = psps->sps.sps_log2_max_pic_order_cnt_lsb_minus4 + 4;
       spsPocMsbCycleFlag = psps->sps.sps_poc_msb_cycle_flag;
       spsPocMsbLen = psps->sps.sps_poc_msb_cycle_len_minus1 + 1;
-      spsExtraPhBitsBytes = psps->sps.sps_num_extra_ph_bits_bytes;
+      spsExtraPhBitsBytes = psps->sps.sps_num_extra_ph_bytes;
     }
     ph.ph_pic_order_cnt_lsb = bs.getBits(pocBits);
 
@@ -858,20 +860,43 @@ namespace VVC
 
     uint8_t ppsCuQpDelta = ppps ? ppps->pps.pps_cu_qp_delta_enabled_flag : 0;
     uint8_t ppsCuChromaQpOffset = ppps ? ppps->pps.pps_cu_chroma_qp_offset_list_enabled_flag : 0;
+    uint8_t spsTemporalMvp = psps ? psps->sps.sps_temporal_mvp_enabled_flag : 0;
+    uint8_t spsMmvdFullpelOnly = psps ? psps->sps.sps_mmvd_fullpel_only_enabled_flag : 0;
+    uint8_t spsProfControlInPh = psps ? psps->sps.sps_prof_control_present_in_ph_flag : 0;
+    uint8_t spsBdofControlInPh = psps ? psps->sps.sps_bdof_control_present_in_ph_flag : 0;
+    uint8_t spsDmvrControlInPh = psps ? psps->sps.sps_dmvr_control_present_in_ph_flag : 0;
+    uint8_t ppsRplInPh = ppps ? ppps->pps.pps_rpl_info_in_ph_flag : 0;
 
-    if(ppsCuQpDelta)
-      ph.ph_cu_qp_delta_subdiv_intra_slice = bs.getGolombU();
-    if(ppsCuChromaQpOffset)
-      ph.ph_cu_chroma_qp_offset_subdiv_intra_slice = bs.getGolombU();
+    if(ph.ph_intra_slice_allowed_flag)
+    {
+      if(ppsCuQpDelta)
+        ph.ph_cu_qp_delta_subdiv_intra_slice = bs.getGolombU();
+      if(ppsCuChromaQpOffset)
+        ph.ph_cu_chroma_qp_offset_subdiv_intra_slice = bs.getGolombU();
+    }
     if(ph.ph_inter_slice_allowed_flag)
     {
       if(ppsCuQpDelta)
         ph.ph_cu_qp_delta_subdiv_inter_slice = bs.getGolombU();
       if(ppsCuChromaQpOffset)
         ph.ph_cu_chroma_qp_offset_subdiv_inter_slice = bs.getGolombU();
+      if(spsTemporalMvp)
+        bs.getBit(); // ph_temporal_mvp_enabled_flag
+      if(spsMmvdFullpelOnly)
+        bs.getBit(); // ph_mmvd_fullpel_only_flag
+      bool presenceFlag = !ppsRplInPh; // 简化：pps_rpl_info_in_ph_flag 时视为无 ref 列表
+      if(presenceFlag)
+      {
+        bs.getBit(); // ph_mvd_l1_zero_flag
+        if(spsBdofControlInPh)
+          bs.getBit(); // ph_bdof_disabled_flag
+        if(spsDmvrControlInPh)
+          bs.getBit(); // ph_dmvr_disabled_flag
+      }
+      if(spsProfControlInPh)
+        bs.getBit(); // ph_prof_disabled_flag
     }
 
-    uint8_t ppsRplInPh = ppps ? ppps->pps.pps_rpl_info_in_ph_flag : 0;
     if(ppsRplInPh)
     {
       // ref_pic_lists（简化：读 rpl_sps_flag / rpl_idx / ref_pic_list_struct）
@@ -945,6 +970,10 @@ namespace VVC
     uint8_t ppsQpDeltaInPh = ppps ? ppps->pps.pps_qp_delta_info_in_ph_flag : 0;
     if(ppsQpDeltaInPh)
       bs.getGolombS(); // ph_qp_delta
+
+    uint8_t spsJointCbcr = psps ? psps->sps.sps_joint_cbcr_enabled_flag : 0;
+    if(spsJointCbcr)
+      ph.ph_joint_cbcr_sign_flag = bs.getBit();
   }
 
   void VvcParserImpl::processPH(std::shared_ptr<PH_NAL> p, BitstreamReader &bs, const Parser::Info &info)
@@ -964,13 +993,17 @@ namespace VVC
       PH ph;
       processPictureHeader(ph, bs, info);
       s.slice_pic_parameter_set_id = ph.ph_pic_parameter_set_id;
+      s.slice_pic_order_cnt_lsb = ph.ph_pic_order_cnt_lsb;
       m_lastPH = std::make_shared<PH_NAL>(p->m_nalHeader);
       m_lastPH->ph = ph;
     }
     else
     {
       if(m_lastPH)
+      {
         s.slice_pic_parameter_set_id = m_lastPH->ph.ph_pic_parameter_set_id;
+        s.slice_pic_order_cnt_lsb = m_lastPH->ph.ph_pic_order_cnt_lsb;
+      }
     }
 
     std::shared_ptr<PPS_NAL> ppps = m_ppsMap[s.slice_pic_parameter_set_id];
@@ -995,15 +1028,15 @@ namespace VVC
     if(rectSlice && numSlicesInSubpic > 1)
       s.slice_address = bs.getBits(ceilLog2(numSlicesInSubpic));
 
-    // sh_extra_bit
+    // sh_extra_bit（NumExtraShBits = 8 * sps_num_extra_sh_bytes）
     if(psps)
     {
-      for(uint32_t i = 0; i < psps->sps.sps_num_extra_sh_bits; i++)
+      for(uint32_t i = 0; i < 8 * psps->sps.sps_num_extra_sh_bytes; i++)
         bs.getBit();
     }
 
-    // sh_num_tiles_in_slice_minus1（单 slice 时读）
-    if((rectSlice && numSlicesInSubpic == 1) || (!rectSlice))
+    // sh_num_tiles_in_slice_minus1（非 rect slice 且多 tile 时读）
+    if(!rectSlice)
       bs.getGolombU();
 
     // sh_slice_type
@@ -1012,10 +1045,6 @@ namespace VVC
       s.slice_type = bs.getGolombU();
     else
       s.slice_type = 2; // I
-
-    // slice POC lsb
-    if(psps)
-      s.slice_pic_order_cnt_lsb = bs.getBits(psps->sps.sps_log2_max_pic_order_cnt_lsb_minus4 + 4);
 
     // slice_qp_delta（简化：读 se）
     s.slice_qp_delta = bs.getGolombS();

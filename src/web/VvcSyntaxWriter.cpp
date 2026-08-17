@@ -15,18 +15,18 @@ namespace web
   {
     switch(type)
     {
-      case VVC::NAL_TRAIL_N: return "NAL_TRAIL_N";
-      case VVC::NAL_TRAIL_R: return "NAL_TRAIL_R";
-      case VVC::NAL_STSA_N: return "NAL_STSA_N";
-      case VVC::NAL_STSA_R: return "NAL_STSA_R";
-      case VVC::NAL_RADL_N: return "NAL_RADL_N";
-      case VVC::NAL_RADL_R: return "NAL_RADL_R";
-      case VVC::NAL_RASL_N: return "NAL_RASL_N";
-      case VVC::NAL_RASL_R: return "NAL_RASL_R";
+      case VVC::NAL_TRAIL_NUT: return "NAL_TRAIL_NUT";
+      case VVC::NAL_STSA_NUT: return "NAL_STSA_NUT";
+      case VVC::NAL_RADL_NUT: return "NAL_RADL_NUT";
+      case VVC::NAL_RASL_NUT: return "NAL_RASL_NUT";
+      case VVC::NAL_RSV_VCL_4: return "NAL_RSV_VCL_4";
+      case VVC::NAL_RSV_VCL_5: return "NAL_RSV_VCL_5";
+      case VVC::NAL_RSV_VCL_6: return "NAL_RSV_VCL_6";
       case VVC::NAL_IDR_W_RADL: return "NAL_IDR_W_RADL";
       case VVC::NAL_IDR_N_LP: return "NAL_IDR_N_LP";
       case VVC::NAL_CRA_NUT: return "NAL_CRA_NUT";
       case VVC::NAL_GDR_NUT: return "NAL_GDR_NUT";
+      case VVC::NAL_RSV_IRAP_11: return "NAL_RSV_IRAP_11";
       case VVC::NAL_OPI: return "NAL_OPI";
       case VVC::NAL_DCI: return "NAL_DCI";
       case VVC::NAL_VPS: return "NAL_VPS";
@@ -79,14 +79,10 @@ namespace web
           root.name = "PH (Picture Header)";
           createPH(std::dynamic_pointer_cast<VVC::PH_NAL>(pNALUnit)->ph, root);
           break;
-        case VVC::NAL_TRAIL_N:
-        case VVC::NAL_TRAIL_R:
-        case VVC::NAL_STSA_N:
-        case VVC::NAL_STSA_R:
-        case VVC::NAL_RADL_N:
-        case VVC::NAL_RADL_R:
-        case VVC::NAL_RASL_N:
-        case VVC::NAL_RASL_R:
+        case VVC::NAL_TRAIL_NUT:
+        case VVC::NAL_STSA_NUT:
+        case VVC::NAL_RADL_NUT:
+        case VVC::NAL_RASL_NUT:
         case VVC::NAL_IDR_W_RADL:
         case VVC::NAL_IDR_N_LP:
         case VVC::NAL_CRA_NUT:
@@ -166,8 +162,8 @@ namespace web
     p.add("sps_bitdepth_minus8 = " + n(s.sps_bitdepth_minus8));
     p.add("sps_log2_max_pic_order_cnt_lsb_minus4 = " + n(s.sps_log2_max_pic_order_cnt_lsb_minus4));
     p.add("sps_poc_msb_cycle_flag = " + n(s.sps_poc_msb_cycle_flag));
-    p.add("sps_num_extra_ph_bits_bytes = " + n(s.sps_num_extra_ph_bits_bytes));
-    p.add("sps_num_extra_sh_bits = " + n(s.sps_num_extra_sh_bits));
+    p.add("sps_num_extra_ph_bytes = " + n(s.sps_num_extra_ph_bytes));
+    p.add("sps_num_extra_sh_bytes = " + n(s.sps_num_extra_sh_bytes));
     p.add("sps_ccalf_enabled_flag = " + n(s.sps_ccalf_enabled_flag));
     p.add("sps_same_qp_table_for_chroma_flag = " + n(s.sps_same_qp_table_for_chroma_flag));
     p.add("sps_idr_rpl_present_flag = " + n(s.sps_idr_rpl_present_flag));
