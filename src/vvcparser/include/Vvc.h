@@ -112,6 +112,7 @@ namespace VVC
     uint8_t  sps_subpic_info_present_flag;
     uint32_t sps_num_subpics_minus1;
     uint8_t  sps_independent_subpics_flag;
+    uint32_t sps_subpic_id_len_minus1;
     std::vector<uint32_t> sps_subpic_ctu_top_left_x;
     std::vector<uint32_t> sps_subpic_ctu_top_left_y;
     std::vector<uint32_t> sps_subpic_width_minus1;

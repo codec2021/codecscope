@@ -11,6 +11,7 @@
   var statusEl = document.getElementById("status");
   var fileInput = document.getElementById("fileInput");
   var openBtn = document.getElementById("openBtn");
+  var resetBtn = document.getElementById("resetBtn");
   var dropzone = document.getElementById("dropzone");
   var fileNameEl = document.getElementById("fileName");
   var codecBadge = document.getElementById("codecBadge");
@@ -354,6 +355,7 @@
         codecBadge.textContent = currentCodec.toUpperCase();
         codecBadge.classList.remove("hidden");
         dropzone.classList.add("hidden");
+        resetBtn.classList.remove("hidden");
         statsBar.classList.remove("hidden");
         timelinePanel.classList.remove("hidden");
         mainArea.classList.remove("hidden");
@@ -380,6 +382,45 @@
 
   openBtn.addEventListener("click", function () { fileInput.click(); });
   fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
+
+  function resetAll() {
+    currentData = null;
+    currentCodec = null;
+    currentWarnings = [];
+    fileBytes = null;
+    selectedIndex = -1;
+
+    codecBadge.classList.add("hidden");
+    codecBadge.textContent = "";
+    fileNameEl.textContent = "未加载文件";
+    fileInput.value = "";
+
+    dropzone.classList.remove("hidden");
+    statsBar.classList.add("hidden");
+    statsBar.innerHTML = "";
+    timelinePanel.classList.add("hidden");
+    mainArea.classList.add("hidden");
+    bottomPanels.classList.add("hidden");
+    resetBtn.classList.add("hidden");
+
+    nalBody.innerHTML = "";
+    nalCount.textContent = "";
+    nalRows.innerHTML = "";
+    syntaxTree.innerHTML = "";
+    syntaxTitle.textContent = "";
+    hexView.innerHTML = "";
+    hexView.classList.add("hidden");
+    syntaxTree.classList.remove("hidden");
+    tabSyntax.classList.add("active");
+    tabHex.classList.remove("active");
+    hdrInfo.innerHTML = "";
+    warningBody.innerHTML = "";
+    warningCount.textContent = "";
+
+    setStatus("解析模块已就绪（H.264/H.265/H.266），请打开或拖入码流文件");
+  }
+
+  resetBtn.addEventListener("click", resetAll);
   dropzone.addEventListener("click", function () { fileInput.click(); });
   dropzone.addEventListener("dragover", function (e) { e.preventDefault(); dropzone.classList.add("dragover"); });
   dropzone.addEventListener("dragleave", function () { dropzone.classList.remove("dragover"); });

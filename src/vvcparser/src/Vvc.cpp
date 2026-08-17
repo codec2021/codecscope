@@ -61,6 +61,7 @@ namespace VVC
     sps_subpic_info_present_flag = 0;
     sps_num_subpics_minus1 = 0;
     sps_independent_subpics_flag = 0;
+    sps_subpic_id_len_minus1 = 0;
     sps_subpic_ctu_top_left_x.clear();
     sps_subpic_ctu_top_left_y.clear();
     sps_subpic_width_minus1.clear();

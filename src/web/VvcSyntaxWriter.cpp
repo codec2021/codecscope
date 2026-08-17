@@ -219,6 +219,8 @@ namespace web
       p.add("pps_num_exp_tile_columns_minus1 = " + n(pp.pps_num_exp_tile_columns_minus1));
       p.add("pps_num_exp_tile_rows_minus1 = " + n(pp.pps_num_exp_tile_rows_minus1));
       p.add("pps_rect_slice_flag = " + n(pp.pps_rect_slice_flag));
+      p.add("pps_single_slice_per_subpic_flag = " + n(pp.pps_single_slice_per_subpic_flag));
+      p.add("pps_num_slices_in_pic_minus1 = " + n(pp.pps_num_slices_in_pic_minus1));
     }
     p.add("pps_cabac_init_present_flag = " + n(pp.pps_cabac_init_present_flag));
     p.add("pps_num_ref_idx_default_active_minus1[0] = " + n(pp.pps_num_ref_idx_default_active_minus1[0]));

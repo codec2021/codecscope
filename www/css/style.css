@@ -41,6 +41,12 @@ body { display: flex; flex-direction: column; }
 }
 .btn:hover { filter: brightness(1.1); }
 
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
 .file-name { color: var(--text-dim); }
 
 .codec-badge {

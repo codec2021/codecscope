@@ -370,7 +370,7 @@ namespace VVC
       }
     }
 
-    bs.getGolombU(); // sps_subpic_id_len_minus1
+    s.sps_subpic_id_len_minus1 = bs.getGolombU();
     bs.getBit();     // sps_subpic_id_mapping_explicitly_signalled_flag
     // 简化：跳过 subpic id mapping（极少使用）
 
@@ -443,7 +443,7 @@ namespace VVC
         for(uint32_t j = 0; j <= s.sps_num_points_in_qp_table_minus1[i]; j++)
         {
           s.sps_delta_qp_in_val_minus1[i].push_back(bs.getGolombU());
-          s.sps_delta_qp_diff_val[i].push_back(bs.getGolombS());
+          s.sps_delta_qp_diff_val[i].push_back(bs.getGolombU());
         }
       }
     }
@@ -980,15 +980,31 @@ namespace VVC
 
     // subpic id
     if(psps && psps->sps.sps_subpic_info_present_flag)
-      s.slice_subpic_id = bs.getGolombU();
+      s.slice_subpic_id = bs.getBits(psps->sps.sps_subpic_id_len_minus1 + 1);
 
-    // slice_address：简化（单 slice 时不读）
+    // slice_address（多 slice 时读，位数 = Ceil(Log2(numSlicesInSubpic))）
+    bool rectSlice = ppps && ppps->pps.pps_rect_slice_flag;
+    uint32_t numSlicesInSubpic = 1;
+    if(ppps)
+    {
+      if(ppps->pps.pps_single_slice_per_subpic_flag)
+        numSlicesInSubpic = 1;
+      else
+        numSlicesInSubpic = ppps->pps.pps_num_slices_in_pic_minus1 + 1;
+    }
+    if(rectSlice && numSlicesInSubpic > 1)
+      s.slice_address = bs.getBits(ceilLog2(numSlicesInSubpic));
+
     // sh_extra_bit
     if(psps)
     {
       for(uint32_t i = 0; i < psps->sps.sps_num_extra_sh_bits; i++)
         bs.getBit();
     }
+
+    // sh_num_tiles_in_slice_minus1（单 slice 时读）
+    if((rectSlice && numSlicesInSubpic == 1) || (!rectSlice))
+      bs.getGolombU();
 
     // sh_slice_type
     bool interAllowed = m_lastPH ? m_lastPH->ph.ph_inter_slice_allowed_flag : true;
