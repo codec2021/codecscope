@@ -73,8 +73,9 @@ body { display: flex; flex-direction: column; }
 .stat .value { font-weight: 600; color: #fff; }
 
 .timeline-panel { flex: 0 0 auto; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
-.timeline-wrap { padding: 6px 12px 10px; }
-.timeline { display: block; width: 100%; height: 44px; cursor: crosshair; }
+.timeline-wrap { padding: 6px 12px 10px; overflow-x: auto; }
+.timeline { display: block; height: 68px; cursor: crosshair; }
+.timeline-tip { position: fixed; pointer-events: none; background: rgba(0,0,0,.85); color: #eee; font: 11px monospace; padding: 3px 6px; border-radius: 3px; z-index: 9999; white-space: pre; }
 .legend { font-weight: 400; font-size: 12px; color: var(--text-dim); margin-left: 8px; }
 .legend b { font-weight: 600; }
 

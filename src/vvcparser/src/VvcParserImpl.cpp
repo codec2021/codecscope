@@ -387,16 +387,19 @@ namespace VVC
 
     if(s.sps_ptl_dpb_hrd_params_present_flag)
     {
-      s.sps_sublayer_dpb_params_flag = bs.getBit();
-      if(s.sps_sublayer_dpb_params_flag)
+      // dpb_parameters
+      bool subLayerInfoFlag = false;
+      if(s.sps_max_sublayers_minus1 > 0)
       {
-        // dpb_parameters（简化跳过）
-        for(int i = 0; i <= s.sps_max_sublayers_minus1; i++)
-        {
-          bs.getGolombU(); // dpb_max_dec_pic_buffering_minus1
-          bs.getGolombU(); // dpb_max_num_reorder_pics
-          bs.getGolombU(); // dpb_max_latency_increase_plus1
-        }
+        s.sps_sublayer_dpb_params_flag = bs.getBit();
+        subLayerInfoFlag = s.sps_sublayer_dpb_params_flag;
+      }
+      int start = subLayerInfoFlag ? 0 : (int)s.sps_max_sublayers_minus1;
+      for(int i = start; i <= (int)s.sps_max_sublayers_minus1; i++)
+      {
+        bs.getGolombU(); // dpb_max_dec_pic_buffering_minus1
+        bs.getGolombU(); // dpb_max_num_reorder_pics
+        bs.getGolombU(); // dpb_max_latency_increase_plus1
       }
     }
 
@@ -404,25 +407,38 @@ namespace VVC
     s.sps_partition_constraints_override_enabled_flag = bs.getBit();
     s.sps_log2_diff_min_qt_min_cb_intra_slice_luma = bs.getGolombU();
     s.sps_max_mtt_hierarchy_depth_intra_slice_luma = bs.getGolombU();
-    s.sps_log2_diff_max_bt_min_qt_intra_slice_luma = bs.getGolombU();
-    s.sps_log2_diff_max_tt_min_qt_intra_slice_luma = bs.getGolombU();
+    if(s.sps_max_mtt_hierarchy_depth_intra_slice_luma != 0)
+    {
+      s.sps_log2_diff_max_bt_min_qt_intra_slice_luma = bs.getGolombU();
+      s.sps_log2_diff_max_tt_min_qt_intra_slice_luma = bs.getGolombU();
+    }
     if(s.sps_chroma_format_idc != 0)
+      s.sps_qtbtt_dual_tree_intra_flag = bs.getBit();
+    if(s.sps_qtbtt_dual_tree_intra_flag)
     {
       s.sps_log2_diff_min_qt_min_cb_intra_slice_chroma = bs.getGolombU();
       s.sps_max_mtt_hierarchy_depth_intra_slice_chroma = bs.getGolombU();
-      s.sps_log2_diff_max_bt_min_qt_intra_slice_chroma = bs.getGolombU();
-      s.sps_log2_diff_max_tt_min_qt_intra_slice_chroma = bs.getGolombU();
+      if(s.sps_max_mtt_hierarchy_depth_intra_slice_chroma != 0)
+      {
+        s.sps_log2_diff_max_bt_min_qt_intra_slice_chroma = bs.getGolombU();
+        s.sps_log2_diff_max_tt_min_qt_intra_slice_chroma = bs.getGolombU();
+      }
     }
     s.sps_log2_diff_min_qt_min_cb_inter_slice = bs.getGolombU();
     s.sps_max_mtt_hierarchy_depth_inter_slice = bs.getGolombU();
-    s.sps_log2_diff_max_bt_min_qt_inter_slice = bs.getGolombU();
-    s.sps_log2_diff_max_tt_min_qt_inter_slice = bs.getGolombU();
+    if(s.sps_max_mtt_hierarchy_depth_inter_slice != 0)
+    {
+      s.sps_log2_diff_max_bt_min_qt_inter_slice = bs.getGolombU();
+      s.sps_log2_diff_max_tt_min_qt_inter_slice = bs.getGolombU();
+    }
 
     s.sps_max_luma_transform_size_64_flag = bs.getBit();
     s.sps_transform_skip_enabled_flag = bs.getBit();
     if(s.sps_transform_skip_enabled_flag)
+    {
       s.sps_log2_transform_skip_max_size_minus2 = bs.getGolombU();
-    s.sps_bdpcm_enabled_flag = bs.getBit();
+      s.sps_bdpcm_enabled_flag = bs.getBit();
+    }
     s.sps_mts_enabled_flag = bs.getBit();
     if(s.sps_mts_enabled_flag)
     {
@@ -466,7 +482,7 @@ namespace VVC
       s.sps_num_ref_pic_lists[i] = bs.getGolombU();
       for(int j = 0; j < s.sps_num_ref_pic_lists[i]; j++)
       {
-        // ref_pic_list_struct（简化）
+        // ref_pic_list_struct
         uint32_t numRefEntries = bs.getGolombU();
         bool ltrpInSliceHeader = false;
         if(s.sps_long_term_ref_pics_flag && numRefEntries > 0)
@@ -478,18 +494,29 @@ namespace VVC
             interLayer = bs.getBit();
           if(!interLayer)
           {
-            bool stRef = false;
+            bool stRef = true; // 默认 true
             if(s.sps_long_term_ref_pics_flag)
               stRef = bs.getBit();
             if(stRef)
             {
-              bs.getGolombU(); // abs_delta_poc_st
+              uint32_t absDeltaPocSt = bs.getGolombU(); // abs_delta_poc_st
+              bool readSign;
+              if((s.sps_weighted_pred_flag || s.sps_weighted_bipred_flag) && k != 0)
+                readSign = (absDeltaPocSt != 0);
+              else
+                readSign = (absDeltaPocSt + 1 != 0);
+              if(readSign)
+                bs.getBit(); // strp_entry_sign_flag
             }
             else
             {
               if(!ltrpInSliceHeader)
-                bs.getBits(s.sps_log2_max_pic_order_cnt_lsb_minus4 + 4); // poc_lsb_lt
+                bs.getBits(s.sps_log2_max_pic_order_cnt_lsb_minus4 + 4); // rpls_poc_lsb_lt
             }
+          }
+          else
+          {
+            bs.getGolombU(); // ilrp_idx
           }
         }
       }
@@ -747,7 +774,7 @@ namespace VVC
     }
     ph.ph_pic_order_cnt_lsb = bs.getBits(pocBits);
 
-    if(ph.ph_gdr_or_irap_pic_flag)
+    if(ph.ph_gdr_pic_flag)
       ph.ph_recovery_poc_cnt = bs.getGolombU();
 
     for(uint32_t i = 0; i < spsExtraPhBitsBytes * 8; i++)

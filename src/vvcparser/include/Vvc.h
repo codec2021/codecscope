@@ -134,6 +134,7 @@ namespace VVC
     uint8_t  sps_max_mtt_hierarchy_depth_intra_slice_luma;
     uint8_t  sps_log2_diff_max_bt_min_qt_intra_slice_luma;
     uint8_t  sps_log2_diff_max_tt_min_qt_intra_slice_luma;
+    uint8_t  sps_qtbtt_dual_tree_intra_flag;
     uint8_t  sps_log2_diff_min_qt_min_cb_intra_slice_chroma;
     uint8_t  sps_max_mtt_hierarchy_depth_intra_slice_chroma;
     uint8_t  sps_log2_diff_max_bt_min_qt_intra_slice_chroma;

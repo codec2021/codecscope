@@ -253,6 +253,7 @@ namespace web
       out += ",\"sliceType\":" + std::to_string(m_nalus[i].sliceType);
       out += ",\"sliceQp\":" + std::to_string(m_nalus[i].sliceQp);
       out += ",\"slicePoc\":" + std::to_string(m_nalus[i].slicePoc);
+      out += ",\"frameNum\":" + std::to_string(m_nalus[i].frameNum);
       out += "}";
     }
     out += "]";

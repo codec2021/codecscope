@@ -212,17 +212,22 @@
     hexView.innerHTML = out;
   }
 
-  // 帧时间轴（Slice 可视化）
+  // 帧时间轴（Slice 可视化，标记帧号 / POC）
   function renderTimeline() {
     var slices = [];
     currentData.nalus.forEach(function (n, i) {
-      if (n.sliceType >= 0) slices.push({ index: i, type: n.sliceType });
+      if (n.sliceType >= 0) slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum });
     });
     if (slices.length === 0) return;
 
     var dpr = window.devicePixelRatio || 1;
-    var w = timeline.clientWidth;
-    var h = timeline.clientHeight;
+    var minBarW = 14;      // 每帧最小宽度
+    var labelH = 26;       // 顶部帧号/POC 标记区
+    var barH = 42;         // 色块区
+    var wrapW = timeline.parentNode.clientWidth - 24;
+    var w = Math.max(wrapW, slices.length * minBarW);
+    var h = labelH + barH;
+    timeline.style.width = w + "px";
     timeline.width = w * dpr;
     timeline.height = h * dpr;
     var ctx = timeline.getContext("2d");
@@ -231,16 +236,49 @@
 
     var barW = w / slices.length;
     var colors = { 2: "#CD9B1D", 0: "#0066ff", 1: "#FF83FA" };
+    var step = Math.max(1, Math.ceil(46 / barW)); // 每 ~46px 至少一个标记，避免重叠
+    ctx.font = "9px monospace";
+    ctx.textBaseline = "middle";
     for (var i = 0; i < slices.length; i++) {
       var s = slices[i];
+      var x = i * barW;
       ctx.fillStyle = colors[s.type] || "#888";
-      ctx.fillRect(i * barW, 0, Math.max(1, barW - 0.5), h);
+      ctx.fillRect(x, labelH, Math.max(1, barW - 0.5), barH);
+      if (i % step === 0) {
+        ctx.fillStyle = "#bbb";
+        ctx.fillText(String(s.frame), x + 1, 7);         // 帧号
+        ctx.fillStyle = "#777";
+        ctx.fillText(String(s.poc), x + 1, labelH - 7);  // POC
+      }
     }
     timeline._slices = slices;
     timeline._barW = barW;
+    timeline._labelH = labelH;
 
     var legend = document.getElementById("timelineLegend");
-    legend.innerHTML = '<b style="color:#CD9B1D">I</b> <b style="color:#0066ff">P</b> <b style="color:#FF83FA">B</b>';
+    legend.innerHTML = '<b style="color:#CD9B1D">I</b> <b style="color:#0066ff">P</b> <b style="color:#FF83FA">B</b> <span style="color:var(--text-dim)">｜上方帧号 / POC</span>';
+  }
+
+  function timelineTip() {
+    if (!timeline._tip) {
+      timeline._tip = document.createElement("div");
+      timeline._tip.className = "timeline-tip";
+      document.body.appendChild(timeline._tip);
+    }
+    return timeline._tip;
+  }
+  function timelineMove(e) {
+    if (!timeline._slices) return;
+    var rect = timeline.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var idx = Math.floor(x / timeline._barW);
+    if (idx < 0 || idx >= timeline._slices.length) { timelineTip().style.display = "none"; return; }
+    var s = timeline._slices[idx];
+    var t = { 2: "I", 0: "P", 1: "B" }[s.type] || "?";
+    timelineTip().textContent = "帧 " + s.frame + "  [" + t + "]\nPOC " + s.poc;
+    timelineTip().style.display = "block";
+    timelineTip().style.left = (e.clientX + 12) + "px";
+    timelineTip().style.top = (e.clientY + 12) + "px";
   }
 
   timeline.addEventListener("click", function (e) {
@@ -252,6 +290,8 @@
       selectNal(timeline._slices[idx].index, true);
     }
   });
+  timeline.addEventListener("mousemove", timelineMove);
+  timeline.addEventListener("mouseleave", function () { timelineTip().style.display = "none"; });
 
   // HDR
   function renderHdr(h) {

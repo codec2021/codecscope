@@ -44,6 +44,7 @@ namespace web
         int                              sliceType;   // -1 = 非 slice, 0/1/2 = B/P/I
         int                              sliceQp;     // -1 = 无效
         int                              slicePoc;
+        int                              frameNum;
         int                              sliceAddr;
         int                              firstSlice;
         std::shared_ptr<HEVC::NALUnit>   nal;

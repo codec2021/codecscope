@@ -172,8 +172,9 @@ namespace web
     e.sliceType = -1;
     e.sliceQp = -1;
     e.slicePoc = -1;
-    e.sliceAddr = -1;
-    e.firstSlice = -1;
+    e.frameNum = -1;
+    e.sliceAddr = 0;
+    e.firstSlice = 0;
     e.nal = pNALUnit;
 
     m_nalusNumber++;
@@ -229,6 +230,7 @@ namespace web
         e.sliceQp = calcSliceQp(pSlice);
         e.sliceAddr = pSlice -> slice_segment_address;
         e.firstSlice = pSlice -> first_slice_segment_in_pic_flag;
+        e.frameNum = (int)m_frameNum;
         m_frameNum++;
         m_INumber++;
         m_prevSliceType = HEVC::Slice::I_SLICE;
@@ -306,6 +308,7 @@ namespace web
           }
           m_prevSliceType = (HEVC::Slice::SliceType)pSlice -> slice_type;
         }
+        e.frameNum = (int)m_frameNum;
         m_frameNum++;
         break;
       }
@@ -401,6 +404,8 @@ namespace web
       out += std::to_string(m_nalus[i].sliceQp);
       out += ",\"slicePoc\":";
       out += std::to_string(m_nalus[i].slicePoc);
+      out += ",\"frameNum\":";
+      out += std::to_string(m_nalus[i].frameNum);
       out += "}";
     }
     out += "]";
