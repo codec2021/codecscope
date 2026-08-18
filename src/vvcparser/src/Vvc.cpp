@@ -286,6 +286,9 @@ namespace VVC
     ph_cu_chroma_qp_offset_subdiv_inter_slice = 0;
     ph_temporal_mvp_enabled_flag = 0;
     ph_mmvd_fullpel_only_flag = 0;
+    ph_mvd_l1_zero_flag = 0;
+    ph_bdof_disabled_flag = 0;
+    ph_dmvr_disabled_flag = 0;
     ph_prof_disabled_flag = 0;
     ph_joint_cbcr_sign_flag = 0;
     ph_slice_sao_chroma_flag = 0;
@@ -309,6 +312,12 @@ namespace VVC
     sh_alf_aps_id_chroma = 0;
     sh_lmcs_used_flag = 0;
     sh_explicit_scaling_list_used_flag = 0;
+    sh_rpl_sps_flag[0] = sh_rpl_sps_flag[1] = 0;
+    sh_rpl_idx[0] = sh_rpl_idx[1] = 0;
+    sh_rpl_idx_present[0] = sh_rpl_idx_present[1] = 0;
+    sh_num_ref_entries[0] = sh_num_ref_entries[1] = 0;
+    sh_ref_pic_lists_present = 0;
+    sh_rpl1_present = 0;
     sh_num_ref_idx_active_override_flag = 0;
     sh_num_ref_idx_active_minus1[0] = sh_num_ref_idx_active_minus1[1] = 0;
     sh_cabac_init_flag = 0;

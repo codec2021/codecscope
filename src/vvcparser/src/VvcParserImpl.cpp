@@ -18,7 +18,7 @@ namespace VVC
       return r;
     }
 
-    void readRefPicListStruct(BitstreamReader &bs, const SPS &s)
+    uint32_t readRefPicListStruct(BitstreamReader &bs, const SPS &s)
     {
       uint32_t numRefEntries = bs.getGolombU();
       bool ltrpInSliceHeader = false;
@@ -56,6 +56,7 @@ namespace VVC
           bs.getGolombU(); // ilrp_idx
         }
       }
+      return numRefEntries;
     }
   }
 
@@ -961,11 +962,11 @@ namespace VVC
       bool presenceFlag = !ppsRplInPh; // 简化：pps_rpl_info_in_ph_flag 时视为无 ref 列表
       if(presenceFlag)
       {
-        bs.getBit(); // ph_mvd_l1_zero_flag
+        ph.ph_mvd_l1_zero_flag = bs.getBit();
         if(spsBdofControlInPh)
-          bs.getBit(); // ph_bdof_disabled_flag
+          ph.ph_bdof_disabled_flag = bs.getBit();
         if(spsDmvrControlInPh)
-          bs.getBit(); // ph_dmvr_disabled_flag
+          ph.ph_dmvr_disabled_flag = bs.getBit();
       }
       if(spsProfControlInPh)
         ph.ph_prof_disabled_flag = bs.getBit();
@@ -1182,23 +1183,29 @@ namespace VVC
       numRefEntries[1] = isB ? ppps->pps.pps_num_ref_idx_default_active_minus1[1] + 1 : 0;
     }
     bool rplPresent = !ppsRplInPh && ((nalType != NAL_IDR_W_RADL && nalType != NAL_IDR_N_LP) || spsIdrRpl);
+    s.sh_ref_pic_lists_present = rplPresent;
     if(rplPresent && psps)
     {
       uint8_t ppsRpl1IdxPresent = ppps->pps.pps_rpl1_idx_present_flag;
+      s.sh_rpl1_present = ppsRpl1IdxPresent;
       for(uint32_t i = 0; i < 2; i++)
       {
         if(i == 1 && !ppsRpl1IdxPresent)
           continue;
         uint32_t spsNumRpl = psps->sps.sps_num_ref_pic_lists[i];
         bool rplSpsFlag = bs.getBit();
+        s.sh_rpl_sps_flag[i] = rplSpsFlag;
         if(rplSpsFlag)
         {
           if(spsNumRpl > 1)
-            bs.getBits(ceilLog2(spsNumRpl)); // rpl_idx
+          {
+            s.sh_rpl_idx_present[i] = 1;
+            s.sh_rpl_idx[i] = bs.getBits(ceilLog2(spsNumRpl)); // rpl_idx
+          }
         }
         else
         {
-          readRefPicListStruct(bs, psps->sps);
+          s.sh_num_ref_entries[i] = readRefPicListStruct(bs, psps->sps);
         }
       }
     }

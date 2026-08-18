@@ -275,6 +275,9 @@ namespace web
     p.add("ph_cu_chroma_qp_offset_subdiv_inter_slice = " + n(ph.ph_cu_chroma_qp_offset_subdiv_inter_slice));
     p.add("ph_temporal_mvp_enabled_flag = " + n(ph.ph_temporal_mvp_enabled_flag));
     p.add("ph_mmvd_fullpel_only_flag = " + n(ph.ph_mmvd_fullpel_only_flag));
+    p.add("ph_mvd_l1_zero_flag = " + n(ph.ph_mvd_l1_zero_flag));
+    p.add("ph_bdof_disabled_flag = " + n(ph.ph_bdof_disabled_flag));
+    p.add("ph_dmvr_disabled_flag = " + n(ph.ph_dmvr_disabled_flag));
     p.add("ph_prof_disabled_flag = " + n(ph.ph_prof_disabled_flag));
     p.add("ph_joint_cbcr_sign_flag = " + n(ph.ph_joint_cbcr_sign_flag));
   }
@@ -299,6 +302,24 @@ namespace web
     }
     p.add("sh_lmcs_used_flag = " + n(s.sh_lmcs_used_flag));
     p.add("sh_explicit_scaling_list_used_flag = " + n(s.sh_explicit_scaling_list_used_flag));
+    if(s.sh_ref_pic_lists_present)
+    {
+      for(int i = 0; i < 2; i++)
+      {
+        if(i == 1 && !s.sh_rpl1_present)
+          break;
+        p.add("sh_rpl_sps_flag[" + n(i) + "] = " + n(s.sh_rpl_sps_flag[i]));
+        if(s.sh_rpl_sps_flag[i])
+        {
+          if(s.sh_rpl_idx_present[i])
+            p.add("sh_rpl_idx[" + n(i) + "] = " + n(s.sh_rpl_idx[i]));
+        }
+        else
+        {
+          p.add("sh_num_ref_entries[" + n(i) + "] = " + n(s.sh_num_ref_entries[i]));
+        }
+      }
+    }
     p.add("sh_num_ref_idx_active_override_flag = " + n(s.sh_num_ref_idx_active_override_flag));
     if(s.sh_num_ref_idx_active_override_flag)
     {

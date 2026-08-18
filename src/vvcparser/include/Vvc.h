@@ -344,6 +344,9 @@ namespace VVC
     uint8_t  ph_cu_chroma_qp_offset_subdiv_inter_slice;
     uint8_t  ph_temporal_mvp_enabled_flag;
     uint8_t  ph_mmvd_fullpel_only_flag;
+    uint8_t  ph_mvd_l1_zero_flag;
+    uint8_t  ph_bdof_disabled_flag;
+    uint8_t  ph_dmvr_disabled_flag;
     uint8_t  ph_prof_disabled_flag;
     int32_t  ph_joint_cbcr_sign_flag;
     int32_t  ph_slice_sao_chroma_flag;
@@ -370,6 +373,12 @@ namespace VVC
     uint8_t  sh_alf_aps_id_chroma;
     uint8_t  sh_lmcs_used_flag;
     uint8_t  sh_explicit_scaling_list_used_flag;
+    uint8_t  sh_rpl_sps_flag[2];
+    uint32_t sh_rpl_idx[2];
+    uint8_t  sh_rpl_idx_present[2];
+    uint32_t sh_num_ref_entries[2];
+    uint8_t  sh_ref_pic_lists_present;
+    uint8_t  sh_rpl1_present;
     uint8_t  sh_num_ref_idx_active_override_flag;
     uint32_t sh_num_ref_idx_active_minus1[2];
     uint8_t  sh_cabac_init_flag;
