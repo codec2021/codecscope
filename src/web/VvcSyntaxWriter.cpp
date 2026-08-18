@@ -88,7 +88,12 @@ namespace web
         case VVC::NAL_CRA_NUT:
         case VVC::NAL_GDR_NUT:
           root.name = "Slice Syntax";
-          createSlice(std::dynamic_pointer_cast<VVC::Slice_NAL>(pNALUnit)->slice, root);
+          {
+            std::shared_ptr<VVC::Slice_NAL> sliceNal = std::dynamic_pointer_cast<VVC::Slice_NAL>(pNALUnit);
+            if(sliceNal->slice.picture_header_in_slice_header_flag && sliceNal->hasPH)
+              createPH(sliceNal->ph, root);
+            createSlice(sliceNal->slice, root);
+          }
           break;
         case VVC::NAL_AUD:
           root.name = "AUD";
@@ -241,12 +246,37 @@ namespace web
   {
     p.add("ph_gdr_or_irap_pic_flag = " + n(ph.ph_gdr_or_irap_pic_flag));
     p.add("ph_non_ref_pic_flag = " + n(ph.ph_non_ref_pic_flag));
+    if(ph.ph_gdr_or_irap_pic_flag)
+      p.add("ph_gdr_pic_flag = " + n(ph.ph_gdr_pic_flag));
     p.add("ph_inter_slice_allowed_flag = " + n(ph.ph_inter_slice_allowed_flag));
     p.add("ph_intra_slice_allowed_flag = " + n(ph.ph_intra_slice_allowed_flag));
     p.add("ph_pic_parameter_set_id = " + n(ph.ph_pic_parameter_set_id));
     p.add("ph_pic_order_cnt_lsb = " + n(ph.ph_pic_order_cnt_lsb));
-    if(ph.ph_gdr_or_irap_pic_flag)
+    if(ph.ph_gdr_pic_flag)
       p.add("ph_recovery_poc_cnt = " + n(ph.ph_recovery_poc_cnt));
+    if(ph.ph_alf_enabled_flag)
+    {
+      p.add("ph_alf_enabled_flag = " + n(ph.ph_alf_enabled_flag));
+      p.add("ph_num_alf_aps_ids_luma = " + n(ph.ph_num_alf_aps_ids_luma));
+    }
+    p.add("ph_lmcs_enabled_flag = " + n(ph.ph_lmcs_enabled_flag));
+    if(ph.ph_lmcs_enabled_flag)
+    {
+      p.add("ph_lmcs_aps_id = " + n(ph.ph_lmcs_aps_id));
+      p.add("ph_chroma_residual_scale_flag = " + n(ph.ph_chroma_residual_scale_flag));
+    }
+    p.add("ph_explicit_scaling_list_enabled_flag = " + n(ph.ph_explicit_scaling_list_enabled_flag));
+    if(ph.ph_explicit_scaling_list_enabled_flag)
+      p.add("ph_scaling_list_aps_id = " + n(ph.ph_scaling_list_aps_id));
+    p.add("ph_partition_constraints_override_flag = " + n(ph.ph_partition_constraints_override_flag));
+    p.add("ph_cu_qp_delta_subdiv_intra_slice = " + n(ph.ph_cu_qp_delta_subdiv_intra_slice));
+    p.add("ph_cu_qp_delta_subdiv_inter_slice = " + n(ph.ph_cu_qp_delta_subdiv_inter_slice));
+    p.add("ph_cu_chroma_qp_offset_subdiv_intra_slice = " + n(ph.ph_cu_chroma_qp_offset_subdiv_intra_slice));
+    p.add("ph_cu_chroma_qp_offset_subdiv_inter_slice = " + n(ph.ph_cu_chroma_qp_offset_subdiv_inter_slice));
+    p.add("ph_temporal_mvp_enabled_flag = " + n(ph.ph_temporal_mvp_enabled_flag));
+    p.add("ph_mmvd_fullpel_only_flag = " + n(ph.ph_mmvd_fullpel_only_flag));
+    p.add("ph_prof_disabled_flag = " + n(ph.ph_prof_disabled_flag));
+    p.add("ph_joint_cbcr_sign_flag = " + n(ph.ph_joint_cbcr_sign_flag));
   }
 
   void VvcSyntaxWriter::createSlice(const VVC::Slice &s, SyntaxNode &p)
@@ -256,7 +286,38 @@ namespace web
     p.add("slice_type = " + n(s.slice_type));
     p.add("slice_pic_parameter_set_id = " + n(s.slice_pic_parameter_set_id));
     p.add("slice_pic_order_cnt_lsb = " + n(s.slice_pic_order_cnt_lsb));
+    p.add("sh_no_output_of_prior_pics_flag = " + n(s.sh_no_output_of_prior_pics_flag));
+    p.add("sh_alf_enabled_flag = " + n(s.sh_alf_enabled_flag));
+    if(s.sh_alf_enabled_flag)
+    {
+      p.add("sh_num_alf_aps_ids_luma = " + n(s.sh_num_alf_aps_ids_luma));
+      for(std::size_t i = 0; i < s.sh_alf_aps_id_luma.size(); i++)
+        p.add("sh_alf_aps_id_luma[" + n(i) + "] = " + n(s.sh_alf_aps_id_luma[i]));
+      p.add("sh_alf_cb_enabled_flag = " + n(s.sh_alf_cb_enabled_flag));
+      p.add("sh_alf_cr_enabled_flag = " + n(s.sh_alf_cr_enabled_flag));
+      p.add("sh_alf_aps_id_chroma = " + n(s.sh_alf_aps_id_chroma));
+    }
+    p.add("sh_lmcs_used_flag = " + n(s.sh_lmcs_used_flag));
+    p.add("sh_explicit_scaling_list_used_flag = " + n(s.sh_explicit_scaling_list_used_flag));
+    p.add("sh_num_ref_idx_active_override_flag = " + n(s.sh_num_ref_idx_active_override_flag));
+    if(s.sh_num_ref_idx_active_override_flag)
+    {
+      p.add("sh_num_ref_idx_active_minus1[0] = " + n(s.sh_num_ref_idx_active_minus1[0]));
+      p.add("sh_num_ref_idx_active_minus1[1] = " + n(s.sh_num_ref_idx_active_minus1[1]));
+    }
+    p.add("sh_cabac_init_flag = " + n(s.sh_cabac_init_flag));
+    p.add("sh_collocated_from_l0_flag = " + n(s.sh_collocated_from_l0_flag));
+    p.add("sh_collocated_ref_idx = " + n(s.sh_collocated_ref_idx));
     p.add("slice_qp_delta = " + n(s.slice_qp_delta));
+    p.add("slice_cb_qp_offset = " + n(s.slice_cb_qp_offset));
+    p.add("slice_cr_qp_offset = " + n(s.slice_cr_qp_offset));
+    p.add("slice_joint_cbcr_qp_offset = " + n(s.slice_joint_cbcr_qp_offset));
+    p.add("sh_cu_chroma_qp_offset_enabled_flag = " + n(s.sh_cu_chroma_qp_offset_enabled_flag));
+    p.add("sh_sao_luma_used_flag = " + n(s.sh_sao_luma_used_flag));
+    p.add("sh_sao_chroma_used_flag = " + n(s.sh_sao_chroma_used_flag));
+    p.add("sh_dep_quant_used_flag = " + n(s.sh_dep_quant_used_flag));
+    p.add("sh_sign_data_hiding_used_flag = " + n(s.sh_sign_data_hiding_used_flag));
+    p.add("sh_ts_residual_coding_disabled_flag = " + n(s.sh_ts_residual_coding_disabled_flag));
   }
 
   void VvcSyntaxWriter::createAUD(const VVC::AUD &a, SyntaxNode &p)

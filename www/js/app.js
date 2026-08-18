@@ -235,7 +235,7 @@
     ctx.clearRect(0, 0, w, h);
 
     var barW = w / slices.length;
-    var colors = { 2: "#CD9B1D", 0: "#0066ff", 1: "#FF83FA" };
+    var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
     var step = Math.max(1, Math.ceil(46 / barW)); // 每 ~46px 至少一个标记，避免重叠
     ctx.font = "9px monospace";
     ctx.textBaseline = "middle";
@@ -256,7 +256,7 @@
     timeline._labelH = labelH;
 
     var legend = document.getElementById("timelineLegend");
-    legend.innerHTML = '<b style="color:#CD9B1D">I</b> <b style="color:#0066ff">P</b> <b style="color:#FF83FA">B</b> <span style="color:var(--text-dim)">｜上方帧号 / POC</span>';
+    legend.innerHTML = '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b> <span style="color:var(--text-dim)">｜上方帧号 / POC</span>';
   }
 
   function timelineTip() {
@@ -443,7 +443,7 @@
     bottomPanels.classList.add("hidden");
     resetBtn.classList.add("hidden");
 
-    nalBody.innerHTML = "";
+    nalSpacer.style.height = "0px";
     nalCount.textContent = "";
     nalRows.innerHTML = "";
     syntaxTree.innerHTML = "";

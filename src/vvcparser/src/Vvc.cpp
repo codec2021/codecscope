@@ -215,6 +215,8 @@ namespace VVC
     pps_cb_qp_offset_list.clear();
     pps_cr_qp_offset_list.clear();
     pps_joint_cbcr_qp_offset_list.clear();
+    pps_weighted_pred_flag = 0;
+    pps_weighted_bipred_flag = 0;
     pps_deblocking_filter_control_present_flag = 0;
     pps_deblocking_filter_override_enabled_flag = 0;
     pps_deblocking_filter_disabled_flag = 0;
@@ -282,6 +284,9 @@ namespace VVC
     ph_cu_qp_delta_subdiv_inter_slice = 0;
     ph_cu_chroma_qp_offset_subdiv_intra_slice = 0;
     ph_cu_chroma_qp_offset_subdiv_inter_slice = 0;
+    ph_temporal_mvp_enabled_flag = 0;
+    ph_mmvd_fullpel_only_flag = 0;
+    ph_prof_disabled_flag = 0;
     ph_joint_cbcr_sign_flag = 0;
     ph_slice_sao_chroma_flag = 0;
     ph_slice_alf_enabled_flag = 0;
@@ -295,10 +300,30 @@ namespace VVC
     slice_type = 2;
     slice_pic_parameter_set_id = 0;
     slice_pic_order_cnt_lsb = 0;
+    sh_no_output_of_prior_pics_flag = 0;
+    sh_alf_enabled_flag = 0;
+    sh_num_alf_aps_ids_luma = 0;
+    sh_alf_aps_id_luma.clear();
+    sh_alf_cb_enabled_flag = 0;
+    sh_alf_cr_enabled_flag = 0;
+    sh_alf_aps_id_chroma = 0;
+    sh_lmcs_used_flag = 0;
+    sh_explicit_scaling_list_used_flag = 0;
+    sh_num_ref_idx_active_override_flag = 0;
+    sh_num_ref_idx_active_minus1[0] = sh_num_ref_idx_active_minus1[1] = 0;
+    sh_cabac_init_flag = 0;
+    sh_collocated_from_l0_flag = 0;
+    sh_collocated_ref_idx = 0;
     slice_qp_delta = 0;
     slice_cb_qp_offset = 0;
     slice_cr_qp_offset = 0;
     slice_joint_cbcr_qp_offset = 0;
+    sh_cu_chroma_qp_offset_enabled_flag = 0;
+    sh_sao_luma_used_flag = 0;
+    sh_sao_chroma_used_flag = 0;
+    sh_dep_quant_used_flag = 0;
+    sh_sign_data_hiding_used_flag = 0;
+    sh_ts_residual_coding_disabled_flag = 0;
   }
 
   NALUnit::NALUnit(NALHeader header): m_processFailed(false), m_nalHeader(header) {}
@@ -307,7 +332,7 @@ namespace VVC
   SPS_NAL::SPS_NAL(NALHeader h): NALUnit(h) {}
   PPS_NAL::PPS_NAL(NALHeader h): NALUnit(h) {}
   PH_NAL::PH_NAL(NALHeader h): NALUnit(h) {}
-  Slice_NAL::Slice_NAL(NALHeader h): NALUnit(h) {}
+  Slice_NAL::Slice_NAL(NALHeader h): NALUnit(h), hasPH(false) {}
   AUD_NAL::AUD_NAL(NALHeader h): NALUnit(h) {}
   SEI_NAL::SEI_NAL(NALHeader h): NALUnit(h) {}
 

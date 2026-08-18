@@ -17,6 +17,46 @@ namespace VVC
       while((1u << r) < v) r++;
       return r;
     }
+
+    void readRefPicListStruct(BitstreamReader &bs, const SPS &s)
+    {
+      uint32_t numRefEntries = bs.getGolombU();
+      bool ltrpInSliceHeader = false;
+      if(s.sps_long_term_ref_pics_flag && numRefEntries > 0)
+        ltrpInSliceHeader = bs.getBit();
+      for(uint32_t k = 0; k < numRefEntries; k++)
+      {
+        bool interLayer = false;
+        if(s.sps_inter_layer_prediction_enabled_flag)
+          interLayer = bs.getBit();
+        if(!interLayer)
+        {
+          bool stRef = true;
+          if(s.sps_long_term_ref_pics_flag)
+            stRef = bs.getBit();
+          if(stRef)
+          {
+            uint32_t absDeltaPocSt = bs.getGolombU(); // abs_delta_poc_st
+            bool readSign;
+            if((s.sps_weighted_pred_flag || s.sps_weighted_bipred_flag) && k != 0)
+              readSign = (absDeltaPocSt != 0);
+            else
+              readSign = (absDeltaPocSt + 1 != 0);
+            if(readSign)
+              bs.getBit(); // strp_entry_sign_flag
+          }
+          else
+          {
+            if(!ltrpInSliceHeader)
+              bs.getBits(s.sps_log2_max_pic_order_cnt_lsb_minus4 + 4); // rpls_poc_lsb_lt
+          }
+        }
+        else
+        {
+          bs.getGolombU(); // ilrp_idx
+        }
+      }
+    }
   }
 
   void VvcParserImpl::addConsumer(Consumer *pconsumer) { m_consumers.push_back(pconsumer); }
@@ -671,22 +711,29 @@ namespace VVC
       if(p_.pps_rect_slice_flag && !p_.pps_single_slice_per_subpic_flag)
       {
         p_.pps_num_slices_in_pic_minus1 = bs.getGolombU();
-        p_.pps_tile_idx_delta_present_flag = bs.getBit();
+        if(p_.pps_num_slices_in_pic_minus1 > 1)
+          p_.pps_tile_idx_delta_present_flag = bs.getBit();
         for(uint32_t i = 0; i < p_.pps_num_slices_in_pic_minus1; i++)
         {
           p_.pps_slice_width_in_tiles_minus1.push_back(bs.getGolombU());
           p_.pps_slice_height_in_tiles_minus1.push_back(bs.getGolombU());
-          p_.pps_num_exp_tile_columns_minus1 = p_.pps_num_exp_tile_columns_minus1;
-          p_.pps_num_exp_tile_rows_minus1 = p_.pps_num_exp_tile_rows_minus1;
         }
       }
-      p_.pps_loop_filter_across_slices_enabled_flag = bs.getBit();
+      if(!p_.pps_rect_slice_flag || p_.pps_single_slice_per_subpic_flag || p_.pps_num_slices_in_pic_minus1 > 0)
+        p_.pps_loop_filter_across_slices_enabled_flag = bs.getBit();
     }
 
     p_.pps_cabac_init_present_flag = bs.getBit();
     p_.pps_num_ref_idx_default_active_minus1[0] = bs.getGolombU();
     p_.pps_num_ref_idx_default_active_minus1[1] = bs.getGolombU();
     p_.pps_rpl1_idx_present_flag = bs.getBit();
+    p_.pps_weighted_pred_flag = bs.getBit();
+    p_.pps_weighted_bipred_flag = bs.getBit();
+    {
+      uint8_t ppsRefWraparound = bs.getBit(); // pps_ref_wraparound_enabled_flag
+      if(ppsRefWraparound)
+        bs.getGolombU(); // pps_pic_width_minus_wraparound_offset
+    }
     p_.pps_init_qp_minus26 = bs.getGolombS();
     p_.pps_cu_qp_delta_enabled_flag = bs.getBit();
     p_.pps_chroma_tool_offsets_present_flag = bs.getBit();
@@ -908,9 +955,9 @@ namespace VVC
       if(ppsCuChromaQpOffset)
         ph.ph_cu_chroma_qp_offset_subdiv_inter_slice = bs.getGolombU();
       if(spsTemporalMvp)
-        bs.getBit(); // ph_temporal_mvp_enabled_flag
+        ph.ph_temporal_mvp_enabled_flag = bs.getBit();
       if(spsMmvdFullpelOnly)
-        bs.getBit(); // ph_mmvd_fullpel_only_flag
+        ph.ph_mmvd_fullpel_only_flag = bs.getBit();
       bool presenceFlag = !ppsRplInPh; // 简化：pps_rpl_info_in_ph_flag 时视为无 ref 列表
       if(presenceFlag)
       {
@@ -921,7 +968,7 @@ namespace VVC
           bs.getBit(); // ph_dmvr_disabled_flag
       }
       if(spsProfControlInPh)
-        bs.getBit(); // ph_prof_disabled_flag
+        ph.ph_prof_disabled_flag = bs.getBit();
     }
 
     if(ppsRplInPh)
@@ -1021,6 +1068,8 @@ namespace VVC
       processPictureHeader(ph, bs, info);
       s.slice_pic_parameter_set_id = ph.ph_pic_parameter_set_id;
       s.slice_pic_order_cnt_lsb = ph.ph_pic_order_cnt_lsb;
+      p->ph = ph;
+      p->hasPH = true;
       m_lastPH = std::make_shared<PH_NAL>(p->m_nalHeader);
       m_lastPH->ph = ph;
     }
@@ -1037,6 +1086,9 @@ namespace VVC
     std::shared_ptr<SPS_NAL> psps;
     if(ppps)
       psps = m_spsMap[ppps->pps.pps_seq_parameter_set_id];
+
+    PH *phPtr = m_lastPH ? &m_lastPH->ph : NULL;
+    uint8_t nalType = p->m_nalHeader.nal_unit_type;
 
     // subpic id
     if(psps && psps->sps.sps_subpic_info_present_flag)
@@ -1073,8 +1125,240 @@ namespace VVC
     else
       s.slice_type = 2; // I
 
-    // slice_qp_delta（简化：读 se）
-    s.slice_qp_delta = bs.getGolombS();
+    bool isI = (s.slice_type == 2);
+    bool isP = (s.slice_type == 1);
+    bool isB = (s.slice_type == 0);
+
+    uint8_t chromaIdc = psps ? psps->sps.sps_chroma_format_idc : 0;
+
+    // (a) sh_no_output_of_prior_pics_flag
+    if(nalType == NAL_IDR_W_RADL || nalType == NAL_IDR_N_LP || nalType == NAL_CRA_NUT || nalType == NAL_GDR_NUT)
+      s.sh_no_output_of_prior_pics_flag = bs.getBit();
+
+    // (b) ALF 参数
+    uint8_t spsAlf = psps ? psps->sps.sps_alf_enabled_flag : 0;
+    uint8_t ppsAlfInPh = ppps ? ppps->pps.pps_alf_info_in_ph_flag : 0;
+    uint8_t spsCcAlf = psps ? psps->sps.sps_ccalf_enabled_flag : 0;
+    if(spsAlf && !ppsAlfInPh)
+    {
+      s.sh_alf_enabled_flag = bs.getBit();
+      if(s.sh_alf_enabled_flag)
+      {
+        s.sh_num_alf_aps_ids_luma = bs.getBits(3);
+        for(uint32_t i = 0; i < s.sh_num_alf_aps_ids_luma; i++)
+          s.sh_alf_aps_id_luma.push_back(bs.getBits(3));
+        if(chromaIdc != 0)
+        {
+          s.sh_alf_cb_enabled_flag = bs.getBit();
+          s.sh_alf_cr_enabled_flag = bs.getBit();
+        }
+        if(s.sh_alf_cb_enabled_flag || s.sh_alf_cr_enabled_flag)
+          s.sh_alf_aps_id_chroma = bs.getBits(3);
+        if(spsCcAlf)
+        {
+          if(bs.getBit()) bs.getBits(3); // sh_alf_cc_cb_enabled_flag + sh_alf_cc_cb_aps_id
+          if(bs.getBit()) bs.getBits(3); // sh_alf_cc_cr_enabled_flag + sh_alf_cc_cr_aps_id
+        }
+      }
+    }
+
+    // (c) sh_lmcs_used_flag
+    uint8_t phLmcs = phPtr ? phPtr->ph_lmcs_enabled_flag : 0;
+    if(phLmcs && !s.picture_header_in_slice_header_flag)
+      s.sh_lmcs_used_flag = bs.getBit();
+
+    // (d) sh_explicit_scaling_list_used_flag
+    uint8_t phExplicitSl = phPtr ? phPtr->ph_explicit_scaling_list_enabled_flag : 0;
+    if(phExplicitSl && !s.picture_header_in_slice_header_flag)
+      s.sh_explicit_scaling_list_used_flag = bs.getBit();
+
+    // (e) ref_pic_lists
+    uint8_t ppsRplInPh = ppps ? ppps->pps.pps_rpl_info_in_ph_flag : 0;
+    uint8_t spsIdrRpl = psps ? psps->sps.sps_idr_rpl_present_flag : 0;
+    uint32_t numRefEntries[2] = {0, 0};
+    if(ppps)
+    {
+      numRefEntries[0] = isI ? 0 : ppps->pps.pps_num_ref_idx_default_active_minus1[0] + 1;
+      numRefEntries[1] = isB ? ppps->pps.pps_num_ref_idx_default_active_minus1[1] + 1 : 0;
+    }
+    bool rplPresent = !ppsRplInPh && ((nalType != NAL_IDR_W_RADL && nalType != NAL_IDR_N_LP) || spsIdrRpl);
+    if(rplPresent && psps)
+    {
+      uint8_t ppsRpl1IdxPresent = ppps->pps.pps_rpl1_idx_present_flag;
+      for(uint32_t i = 0; i < 2; i++)
+      {
+        if(i == 1 && !ppsRpl1IdxPresent)
+          continue;
+        uint32_t spsNumRpl = psps->sps.sps_num_ref_pic_lists[i];
+        bool rplSpsFlag = bs.getBit();
+        if(rplSpsFlag)
+        {
+          if(spsNumRpl > 1)
+            bs.getBits(ceilLog2(spsNumRpl)); // rpl_idx
+        }
+        else
+        {
+          readRefPicListStruct(bs, psps->sps);
+        }
+      }
+    }
+
+    // (f) sh_num_ref_idx_active_override_flag
+    if((!isI && numRefEntries[0] > 1) || (isB && numRefEntries[1] > 1))
+    {
+      s.sh_num_ref_idx_active_override_flag = bs.getBit();
+      if(s.sh_num_ref_idx_active_override_flag)
+      {
+        for(uint32_t i = 0; i < (isB ? 2u : 1u); i++)
+        {
+          if(numRefEntries[i] > 1)
+            s.sh_num_ref_idx_active_minus1[i] = bs.getGolombU();
+        }
+      }
+    }
+
+    // NumRefIdxActive（用于 collocated_ref_idx / pred_weight_table）
+    uint32_t NumRefIdxActive[2] = {0, 0};
+    for(uint32_t i = 0; i < 2; i++)
+    {
+      if(isB || (isP && i == 0))
+      {
+        if(s.sh_num_ref_idx_active_override_flag)
+          NumRefIdxActive[i] = s.sh_num_ref_idx_active_minus1[i] + 1;
+        else
+          NumRefIdxActive[i] = ppps ? ppps->pps.pps_num_ref_idx_default_active_minus1[i] + 1 : 1;
+      }
+      else
+        NumRefIdxActive[i] = 0;
+    }
+
+    // (g) sh_cabac_init_flag + (h) sh_collocated_from_l0_flag / sh_collocated_ref_idx
+    uint8_t phTemporalMvp = phPtr ? phPtr->ph_temporal_mvp_enabled_flag : 0;
+    if(!isI)
+    {
+      uint8_t ppsCabacInit = ppps ? ppps->pps.pps_cabac_init_present_flag : 0;
+      if(ppsCabacInit)
+        s.sh_cabac_init_flag = bs.getBit();
+
+      if(phTemporalMvp && !ppsRplInPh)
+      {
+        if(isB)
+          s.sh_collocated_from_l0_flag = bs.getBit();
+        else
+          s.sh_collocated_from_l0_flag = 1;
+        if((s.sh_collocated_from_l0_flag && NumRefIdxActive[0] > 1) ||
+           (!s.sh_collocated_from_l0_flag && NumRefIdxActive[1] > 1))
+          s.sh_collocated_ref_idx = bs.getGolombU();
+      }
+    }
+
+    // (i) pred_weight_table
+    uint8_t ppsWpInPh = ppps ? ppps->pps.pps_wp_info_in_ph_flag : 0;
+    uint8_t ppsWeightedPred = ppps ? ppps->pps.pps_weighted_pred_flag : 0;
+    uint8_t ppsWeightedBipred = ppps ? ppps->pps.pps_weighted_bipred_flag : 0;
+    if(!ppsWpInPh && ((ppsWeightedPred && isP) || (ppsWeightedBipred && isB)))
+    {
+      bs.getGolombU(); // luma_log2_weight_denom
+      if(chromaIdc != 0)
+        bs.getGolombS(); // delta_chroma_log2_weight_denom
+      for(uint32_t l = 0; l < (isB ? 2u : 1u); l++)
+      {
+        uint32_t n = NumRefIdxActive[l];
+        std::vector<bool> lumaFlag(n, false);
+        std::vector<bool> chromaFlag(n, false);
+        for(uint32_t i = 0; i < n; i++)
+          lumaFlag[i] = bs.getBit();
+        if(chromaIdc != 0)
+          for(uint32_t i = 0; i < n; i++)
+            chromaFlag[i] = bs.getBit();
+        for(uint32_t i = 0; i < n; i++)
+          if(lumaFlag[i]) { bs.getGolombS(); bs.getGolombS(); }
+        if(chromaIdc != 0)
+          for(uint32_t i = 0; i < n; i++)
+            if(chromaFlag[i])
+              for(uint32_t j = 0; j < 2; j++) { bs.getGolombS(); bs.getGolombS(); }
+      }
+    }
+
+    // (j) sh_qp_delta
+    uint8_t ppsQpDeltaInPh = ppps ? ppps->pps.pps_qp_delta_info_in_ph_flag : 0;
+    if(!ppsQpDeltaInPh)
+      s.slice_qp_delta = bs.getGolombS();
+
+    // (k) chroma QP offset
+    uint8_t ppsSliceChromaQpOffsets = ppps ? ppps->pps.pps_slice_chroma_qp_offsets_present_flag : 0;
+    uint8_t spsJointCbcr = psps ? psps->sps.sps_joint_cbcr_enabled_flag : 0;
+    if(ppsSliceChromaQpOffsets)
+    {
+      s.slice_cb_qp_offset = bs.getGolombS();
+      s.slice_cr_qp_offset = bs.getGolombS();
+      if(spsJointCbcr)
+        s.slice_joint_cbcr_qp_offset = bs.getGolombS();
+    }
+
+    // (l) sh_cu_chroma_qp_offset_enabled_flag
+    uint8_t ppsCuChromaQpOffsetList = ppps ? ppps->pps.pps_cu_chroma_qp_offset_list_enabled_flag : 0;
+    if(ppsCuChromaQpOffsetList)
+      s.sh_cu_chroma_qp_offset_enabled_flag = bs.getBit();
+
+    // (m) SAO
+    uint8_t spsSao = psps ? psps->sps.sps_sao_enabled_flag : 0;
+    uint8_t ppsSaoInPh = ppps ? ppps->pps.pps_sao_info_in_ph_flag : 0;
+    if(spsSao && !ppsSaoInPh)
+    {
+      s.sh_sao_luma_used_flag = bs.getBit();
+      if(chromaIdc != 0)
+        s.sh_sao_chroma_used_flag = bs.getBit();
+    }
+
+    // (n) deblocking
+    uint8_t ppsDeblockOverride = ppps ? ppps->pps.pps_deblocking_filter_override_enabled_flag : 0;
+    uint8_t ppsDbfInPh = ppps ? ppps->pps.pps_dbf_info_in_ph_flag : 0;
+    if(ppsDeblockOverride && !ppsDbfInPh)
+    {
+      if(bs.getBit()) // sh_deblocking_params_present_flag
+      {
+        uint8_t ppsDeblockDisabled = ppps ? ppps->pps.pps_deblocking_filter_disabled_flag : 0;
+        bool deblockDisabled = ppsDeblockDisabled;
+        if(!ppsDeblockDisabled)
+          deblockDisabled = bs.getBit();
+        if(!deblockDisabled)
+        {
+          bs.getGolombS(); // sh_luma_beta_offset_div2
+          bs.getGolombS(); // sh_luma_tc_offset_div2
+          uint8_t ppsChromaTool = ppps ? ppps->pps.pps_chroma_tool_offsets_present_flag : 0;
+          if(ppsChromaTool)
+          {
+            bs.getGolombS(); bs.getGolombS();
+            bs.getGolombS(); bs.getGolombS();
+          }
+        }
+      }
+    }
+
+    // (o) sh_dep_quant_used_flag
+    uint8_t spsDepQuant = psps ? psps->sps.sps_dep_quant_enabled_flag : 0;
+    if(spsDepQuant)
+      s.sh_dep_quant_used_flag = bs.getBit();
+
+    // (p) sh_sign_data_hiding_used_flag
+    uint8_t spsSignDataHiding = psps ? psps->sps.sps_sign_data_hiding_enabled_flag : 0;
+    if(spsSignDataHiding && !s.sh_dep_quant_used_flag)
+      s.sh_sign_data_hiding_used_flag = bs.getBit();
+
+    // (q) sh_ts_residual_coding_disabled_flag
+    uint8_t spsTransformSkip = psps ? psps->sps.sps_transform_skip_enabled_flag : 0;
+    if(spsTransformSkip && !s.sh_dep_quant_used_flag && !s.sh_sign_data_hiding_used_flag)
+      s.sh_ts_residual_coding_disabled_flag = bs.getBit();
+
+    // (r) sh_slice_header_extension
+    uint8_t ppsShExtension = ppps ? ppps->pps.pps_slice_header_extension_present_flag : 0;
+    if(ppsShExtension)
+    {
+      uint32_t len = bs.getGolombU();
+      for(uint32_t i = 0; i < len; i++)
+        bs.getBits(8);
+    }
   }
 
   void VvcParserImpl::processAUD(std::shared_ptr<AUD_NAL> p, BitstreamReader &bs)

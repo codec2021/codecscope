@@ -270,6 +270,8 @@ namespace VVC
     std::vector<int32_t> pps_cb_qp_offset_list;
     std::vector<int32_t> pps_cr_qp_offset_list;
     std::vector<int32_t> pps_joint_cbcr_qp_offset_list;
+    uint8_t  pps_weighted_pred_flag;
+    uint8_t  pps_weighted_bipred_flag;
     uint8_t  pps_deblocking_filter_control_present_flag;
     uint8_t  pps_deblocking_filter_override_enabled_flag;
     uint8_t  pps_deblocking_filter_disabled_flag;
@@ -340,6 +342,9 @@ namespace VVC
     uint8_t  ph_cu_qp_delta_subdiv_inter_slice;
     uint8_t  ph_cu_chroma_qp_offset_subdiv_intra_slice;
     uint8_t  ph_cu_chroma_qp_offset_subdiv_inter_slice;
+    uint8_t  ph_temporal_mvp_enabled_flag;
+    uint8_t  ph_mmvd_fullpel_only_flag;
+    uint8_t  ph_prof_disabled_flag;
     int32_t  ph_joint_cbcr_sign_flag;
     int32_t  ph_slice_sao_chroma_flag;
     int32_t  ph_slice_alf_enabled_flag;
@@ -356,10 +361,30 @@ namespace VVC
     uint32_t slice_type;
     uint8_t  slice_pic_parameter_set_id;
     uint32_t slice_pic_order_cnt_lsb;
+    uint8_t  sh_no_output_of_prior_pics_flag;
+    uint8_t  sh_alf_enabled_flag;
+    uint8_t  sh_num_alf_aps_ids_luma;
+    std::vector<uint32_t> sh_alf_aps_id_luma;
+    uint8_t  sh_alf_cb_enabled_flag;
+    uint8_t  sh_alf_cr_enabled_flag;
+    uint8_t  sh_alf_aps_id_chroma;
+    uint8_t  sh_lmcs_used_flag;
+    uint8_t  sh_explicit_scaling_list_used_flag;
+    uint8_t  sh_num_ref_idx_active_override_flag;
+    uint32_t sh_num_ref_idx_active_minus1[2];
+    uint8_t  sh_cabac_init_flag;
+    uint8_t  sh_collocated_from_l0_flag;
+    uint32_t sh_collocated_ref_idx;
     int32_t  slice_qp_delta;
     int32_t  slice_cb_qp_offset;
     int32_t  slice_cr_qp_offset;
     int32_t  slice_joint_cbcr_qp_offset;
+    uint8_t  sh_cu_chroma_qp_offset_enabled_flag;
+    uint8_t  sh_sao_luma_used_flag;
+    uint8_t  sh_sao_chroma_used_flag;
+    uint8_t  sh_dep_quant_used_flag;
+    uint8_t  sh_sign_data_hiding_used_flag;
+    uint8_t  sh_ts_residual_coding_disabled_flag;
 
     void toDefault();
   };
@@ -407,6 +432,8 @@ namespace VVC
   public:
     Slice_NAL(NALHeader header);
     Slice slice;
+    PH     ph;         // picture header（内联时）
+    bool   hasPH;
   };
 
   class AUD
