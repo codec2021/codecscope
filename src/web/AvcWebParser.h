@@ -40,8 +40,18 @@ namespace web
         int                         sliceQp;
         int                         slicePoc;
         int                         frameNum;
+        std::vector<int>            refPocs;
         std::shared_ptr<AVC::NALUnit> nal;
       };
+
+      struct RefPic
+      {
+        int   picNum;    // 展开后的 PicNum（短期）
+        int   poc;       // POC
+        int   longTermFrameIdx;  // -1 = 短期
+      };
+
+      void fillPocAndRefs(NALUEntry &e, const AVC::Slice_NAL *p);
 
       struct WarningEntry
       {
@@ -63,6 +73,13 @@ namespace web
       std::size_t m_level;
       bool        m_profilePresent;
       bool        m_levelPresent;
+
+      std::vector<RefPic> m_dpb;   // 短期 + 长期参考帧
+      int         m_pocMsb;
+      int         m_prevPicOrderCntLsb;
+      int         m_prevFrameNum;
+      bool        m_pocInitialized;
+      int         m_maxFrameNum;
 
       std::shared_ptr<AVC::SPS_NAL> m_lastSPS;
 
