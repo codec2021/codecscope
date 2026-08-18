@@ -76,6 +76,10 @@ body { display: flex; flex-direction: column; }
 .timeline-wrap { padding: 6px 12px 10px; overflow-x: auto; }
 .timeline { display: block; height: 68px; cursor: crosshair; }
 .timeline-tip { position: fixed; pointer-events: none; background: rgba(0,0,0,.85); color: #eee; font: 11px monospace; padding: 3px 6px; border-radius: 3px; z-index: 9999; white-space: pre; }
+.preview-panel { flex: 0 0 auto; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+.preview-wrap { padding: 8px 12px 12px; display: flex; align-items: flex-start; gap: 12px; }
+.preview-canvas { background: #000; border: 1px solid var(--border); border-radius: 4px; max-width: 480px; }
+.preview-msg { color: var(--text-dim); font-size: 12px; padding-top: 6px; }
 .legend { font-weight: 400; font-size: 12px; color: var(--text-dim); margin-left: 8px; }
 .legend b { font-weight: 600; }
 

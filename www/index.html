@@ -32,6 +32,14 @@
     <div class="timeline-wrap"><canvas id="timeline" class="timeline"></canvas></div>
   </section>
 
+  <section id="previewPanel" class="preview-panel hidden">
+    <div class="panel-title">画面预览 <span id="previewHint" class="legend"></span></div>
+    <div class="preview-wrap">
+      <canvas id="previewCanvas" class="preview-canvas"></canvas>
+      <div id="previewMsg" class="preview-msg">点击时间轴上的帧查看画面</div>
+    </div>
+  </section>
+
   <main id="mainArea" class="main-area hidden">
     <section class="panel nal-panel">
       <div class="panel-title">NAL 单元列表 <span id="nalCount" class="count"></span></div>
