@@ -462,6 +462,16 @@ namespace web
       out += ",\"level\":\"NOT PRESENT\"";
 
     out += ",\"tier\":\"\"";
+
+    int avcBitDepth = 8;
+    int avcChromaFormat = 1;
+    if(m_lastSPS)
+    {
+      avcBitDepth = 8 + (int)m_lastSPS->sps.bit_depth_luma_minus8;
+      avcChromaFormat = (int)m_lastSPS->sps.chroma_format_idc;
+    }
+    out += ",\"bitDepth\":" + std::to_string(avcBitDepth);
+    out += ",\"chromaFormat\":" + std::to_string(avcChromaFormat);
     out += "}";
 
     // HDR

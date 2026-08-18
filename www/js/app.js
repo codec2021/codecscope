@@ -38,6 +38,7 @@
   var previewHint = document.getElementById("previewHint");
 
   var ROW_HEIGHT = 22;
+  var timelineZoom = 1;   // 时间轴缩放倍数
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function hex8(v) { var s = v.toString(16); while (s.length < 8) s = "0" + s; return "0x" + s; }
@@ -230,14 +231,15 @@
     if (slices.length === 0) return;
 
     var dpr = window.devicePixelRatio || 1;
-    var minBarW = 14;      // 每帧最小宽度
+    var minBarW = 22 * timelineZoom;   // 每帧最小宽度（可缩放）
     var labelH = 26;       // 顶部帧号/POC 标记区
-    var arrowH = 58;       // 参考帧箭头区
+    var arrowH = 70;       // 参考帧箭头区
     var barH = 42;         // 色块区
     var wrapW = timeline.parentNode.clientWidth - 24;
     var w = Math.max(wrapW, slices.length * minBarW);
     var h = labelH + arrowH + barH;
     timeline.style.width = w + "px";
+    timeline.style.height = h + "px";
     timeline.width = w * dpr;
     timeline.height = h * dpr;
     var ctx = timeline.getContext("2d");
@@ -248,10 +250,7 @@
     var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
     var barTop = labelH + arrowH;
 
-    // 参考帧箭头（参考帧 → 当前帧）
-    var arrowColor = "rgba(255,190,60,0.55)";
-    ctx.strokeStyle = arrowColor;
-    ctx.fillStyle = arrowColor;
+    // 参考帧箭头（参考帧 → 当前帧），过去参考偏蓝、未来参考偏橙
     ctx.lineWidth = 1;
     for (var i = 0; i < slices.length; i++) {
       var s = slices[i];
@@ -260,19 +259,23 @@
         if (j === undefined || j === i) continue;
         var x1 = i * barW + barW / 2;   // 当前帧
         var x2 = j * barW + barW / 2;   // 参考帧
-        var arc = Math.max(8, Math.min(44, Math.abs(x1 - x2) * 0.14));
+        var toFuture = (s.refs[r] > s.poc);
+        var col = toFuture ? "rgba(255,140,40,0.75)" : "rgba(80,160,255,0.7)";
+        ctx.strokeStyle = col;
+        ctx.fillStyle = col;
+        var dist = Math.abs(x1 - x2);
+        var arc = Math.max(10, Math.min(52, dist * 0.18));
         var mid = (x1 + x2) / 2;
         ctx.beginPath();
         ctx.moveTo(x2, barTop);
         ctx.quadraticCurveTo(mid, barTop - arc, x1, barTop);
         ctx.stroke();
         // 箭头头部（指向当前帧 x1）
-        var ang = Math.atan2((x1 - mid), arc); // 终点切向
         var hs = 4;
         ctx.beginPath();
         ctx.moveTo(x1, barTop);
-        ctx.lineTo(x1 - hs * 0.9, barTop - hs * 0.5);
-        ctx.lineTo(x1 - hs * 0.9, barTop + hs * 0.5);
+        ctx.lineTo(x1 - hs * 0.9, barTop - hs * 0.6);
+        ctx.lineTo(x1 - hs * 0.9, barTop + hs * 0.6);
         ctx.closePath();
         ctx.fill();
       }
@@ -299,8 +302,19 @@
     timeline._labelH = labelH;
 
     var legend = document.getElementById("timelineLegend");
-    legend.innerHTML = '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b> <span style="color:#ffbe3c">↗</span><span style="color:var(--text-dim)"> 参考帧箭头｜上方帧号 / POC</span>';
+    legend.innerHTML =
+      '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b>' +
+      ' <span style="color:#50a0ff">◂</span><span style="color:var(--text-dim)">过去参考</span>' +
+      ' <span style="color:#ff8c28">▸</span><span style="color:var(--text-dim)">未来参考</span>' +
+      ' <span style="color:var(--text-dim)">｜缩放</span>' +
+      ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
+      ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>';
   }
+
+  window.__tlZoom = function (d) {
+    timelineZoom = Math.max(0.5, Math.min(6, timelineZoom + d * 0.5));
+    renderTimeline();
+  };
 
   function timelineTip() {
     if (!timeline._tip) {
@@ -451,9 +465,11 @@
       desc[o++] = levelIdc;
       desc[o++] = 0xF0; // min_spatial_segmentation_idc = 0
       desc[o++] = 0x00; // parallelismType
-      desc[o++] = 0xFC | 1; // chromaFormat = 1 (4:2:0)
-      desc[o++] = 0xF8 | 0; // bitDepthLumaMinus8 = 0
-      desc[o++] = 0xF8 | 0; // bitDepthChromaMinus8 = 0
+      var cf = (currentData.streamInfo && currentData.streamInfo.chromaFormat) || 1;
+      var bd = ((currentData.streamInfo && currentData.streamInfo.bitDepth) || 8) - 8;
+      desc[o++] = 0xFC | (cf & 3); // chromaFormat
+      desc[o++] = 0xF8 | (bd & 7); // bitDepthLumaMinus8
+      desc[o++] = 0xF8 | (bd & 7); // bitDepthChromaMinus8
       desc[o++] = 0x00; desc[o++] = 0x00; // avgFrameRate
       desc[o++] = 0x0F; // constantFrameRate(2)=0, numTemporalLayers(3)=1, temporalIdNested(1)=1, lengthSizeMinusOne(2)=3
       desc[o++] = arrays.length; // numOfArrays
@@ -487,7 +503,10 @@
       var compat = (sps[4] << 24) | (sps[5] << 16) | (sps[6] << 8) | sps[7];
       var level = sps[14];
       var spaceChar = ["", "A", "B", "C"][space];
-      return "hev1." + spaceChar + profileIdc + "." + compat.toString(16).toUpperCase() + ".L" + level + ".B0";
+      // codec string 里 compat/constraint 是 bit-reversed（ISO 14496-15）
+      function rev32(v) { var r = 0; for (var i = 0; i < 32; i++) { r = (r << 1) | (v & 1); v >>>= 1; } return r >>> 0; }
+      var compatHex = rev32(compat).toString(16).toUpperCase();
+      return "hev1." + spaceChar + profileIdc + "." + compatHex + ".L" + level + ".B0";
     }
     return null;
   }

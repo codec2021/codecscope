@@ -576,6 +576,16 @@ namespace web
       out += ",\"level\":\"NOT PRESENT\"";
 
     out += ",\"tier\":\"" + jsonEscape(tierName(m_tier)) + "\"";
+
+    int hevcBitDepth = 8;
+    int hevcChromaFormat = 1;
+    if(m_lastSPS)
+    {
+      hevcBitDepth = 8 + (int)m_lastSPS -> bit_depth_luma_minus8;
+      hevcChromaFormat = (int)m_lastSPS -> chroma_format_idc;
+    }
+    out += ",\"bitDepth\":" + std::to_string(hevcBitDepth);
+    out += ",\"chromaFormat\":" + std::to_string(hevcChromaFormat);
     out += "}";
 
     // HDR info
