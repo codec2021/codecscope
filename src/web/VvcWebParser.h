@@ -40,8 +40,11 @@ namespace web
         int                         sliceQp;
         int                         slicePoc;
         int                         frameNum;
+        std::vector<int>            refPocs;
         std::shared_ptr<VVC::NALUnit> nal;
       };
+
+      void fillPocAndRefs(NALUEntry &e, const VVC::Slice_NAL *p);
 
       struct WarningEntry
       {
@@ -63,6 +66,10 @@ namespace web
       std::size_t m_level;
       bool        m_profilePresent;
       bool        m_levelPresent;
+
+      int         m_pocMsb;
+      int         m_prevPicOrderCntLsb;
+      bool        m_pocInitialized;
 
       std::shared_ptr<VVC::SPS_NAL> m_lastSPS;
 

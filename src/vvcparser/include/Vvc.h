@@ -168,6 +168,7 @@ namespace VVC
     uint8_t  sps_idr_rpl_present_flag;
     uint8_t  sps_rpl1_same_as_rpl0_flag;
     uint8_t  sps_num_ref_pic_lists[2];
+    std::vector<std::vector<int32_t>> sps_ref_poc_delta[2];
     uint8_t  sps_ref_wraparound_enabled_flag;
     uint8_t  sps_temporal_mvp_enabled_flag;
     uint8_t  sps_sbtmvp_enabled_flag;
@@ -377,6 +378,7 @@ namespace VVC
     uint32_t sh_rpl_idx[2];
     uint8_t  sh_rpl_idx_present[2];
     uint32_t sh_num_ref_entries[2];
+    std::vector<int32_t> sh_ref_poc_delta[2];
     uint8_t  sh_ref_pic_lists_present;
     uint8_t  sh_rpl1_present;
     uint8_t  sh_num_ref_idx_active_override_flag;

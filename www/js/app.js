@@ -212,21 +212,27 @@
     hexView.innerHTML = out;
   }
 
-  // 帧时间轴（Slice 可视化，标记帧号 / POC）
+  // 帧时间轴（Slice 可视化，标记帧号 / POC + 参考帧箭头）
   function renderTimeline() {
     var slices = [];
+    var pocMap = {};
     currentData.nalus.forEach(function (n, i) {
-      if (n.sliceType >= 0) slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum });
+      if (n.sliceType >= 0) {
+        var idx = slices.length;
+        slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum, refs: n.refPocs || [] });
+        if (n.slicePoc >= 0) pocMap[n.slicePoc] = idx;
+      }
     });
     if (slices.length === 0) return;
 
     var dpr = window.devicePixelRatio || 1;
     var minBarW = 14;      // 每帧最小宽度
     var labelH = 26;       // 顶部帧号/POC 标记区
+    var arrowH = 58;       // 参考帧箭头区
     var barH = 42;         // 色块区
     var wrapW = timeline.parentNode.clientWidth - 24;
     var w = Math.max(wrapW, slices.length * minBarW);
-    var h = labelH + barH;
+    var h = labelH + arrowH + barH;
     timeline.style.width = w + "px";
     timeline.width = w * dpr;
     timeline.height = h * dpr;
@@ -236,6 +242,39 @@
 
     var barW = w / slices.length;
     var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
+    var barTop = labelH + arrowH;
+
+    // 参考帧箭头（参考帧 → 当前帧）
+    var arrowColor = "rgba(255,190,60,0.55)";
+    ctx.strokeStyle = arrowColor;
+    ctx.fillStyle = arrowColor;
+    ctx.lineWidth = 1;
+    for (var i = 0; i < slices.length; i++) {
+      var s = slices[i];
+      for (var r = 0; r < s.refs.length; r++) {
+        var j = pocMap[s.refs[r]];
+        if (j === undefined || j === i) continue;
+        var x1 = i * barW + barW / 2;   // 当前帧
+        var x2 = j * barW + barW / 2;   // 参考帧
+        var arc = Math.max(8, Math.min(44, Math.abs(x1 - x2) * 0.14));
+        var mid = (x1 + x2) / 2;
+        ctx.beginPath();
+        ctx.moveTo(x2, barTop);
+        ctx.quadraticCurveTo(mid, barTop - arc, x1, barTop);
+        ctx.stroke();
+        // 箭头头部（指向当前帧 x1）
+        var ang = Math.atan2((x1 - mid), arc); // 终点切向
+        var hs = 4;
+        ctx.beginPath();
+        ctx.moveTo(x1, barTop);
+        ctx.lineTo(x1 - hs * 0.9, barTop - hs * 0.5);
+        ctx.lineTo(x1 - hs * 0.9, barTop + hs * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // 色块 + 帧号 / POC 标记
     var step = Math.max(1, Math.ceil(46 / barW)); // 每 ~46px 至少一个标记，避免重叠
     ctx.font = "9px monospace";
     ctx.textBaseline = "middle";
@@ -243,7 +282,7 @@
       var s = slices[i];
       var x = i * barW;
       ctx.fillStyle = colors[s.type] || "#888";
-      ctx.fillRect(x, labelH, Math.max(1, barW - 0.5), barH);
+      ctx.fillRect(x, barTop, Math.max(1, barW - 0.5), barH);
       if (i % step === 0) {
         ctx.fillStyle = "#bbb";
         ctx.fillText(String(s.frame), x + 1, 7);         // 帧号
@@ -256,7 +295,7 @@
     timeline._labelH = labelH;
 
     var legend = document.getElementById("timelineLegend");
-    legend.innerHTML = '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b> <span style="color:var(--text-dim)">｜上方帧号 / POC</span>';
+    legend.innerHTML = '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b> <span style="color:#ffbe3c">↗</span><span style="color:var(--text-dim)"> 参考帧箭头｜上方帧号 / POC</span>';
   }
 
   function timelineTip() {
@@ -275,7 +314,8 @@
     if (idx < 0 || idx >= timeline._slices.length) { timelineTip().style.display = "none"; return; }
     var s = timeline._slices[idx];
     var t = { 2: "I", 0: "P", 1: "B" }[s.type] || "?";
-    timelineTip().textContent = "帧 " + s.frame + "  [" + t + "]\nPOC " + s.poc;
+    var refStr = (s.refs && s.refs.length) ? "\n参考 POC " + s.refs.join(",") : "";
+    timelineTip().textContent = "帧 " + s.frame + "  [" + t + "]\nPOC " + s.poc + refStr;
     timelineTip().style.display = "block";
     timelineTip().style.left = (e.clientX + 12) + "px";
     timelineTip().style.top = (e.clientY + 12) + "px";

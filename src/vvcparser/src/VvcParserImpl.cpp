@@ -18,14 +18,16 @@ namespace VVC
       return r;
     }
 
-    uint32_t readRefPicListStruct(BitstreamReader &bs, const SPS &s)
+    std::vector<int32_t> readRefPicListStruct(BitstreamReader &bs, const SPS &s)
     {
+      std::vector<int32_t> deltas;
       uint32_t numRefEntries = bs.getGolombU();
       bool ltrpInSliceHeader = false;
       if(s.sps_long_term_ref_pics_flag && numRefEntries > 0)
         ltrpInSliceHeader = bs.getBit();
       for(uint32_t k = 0; k < numRefEntries; k++)
       {
+        int32_t delta = INT32_MIN;
         bool interLayer = false;
         if(s.sps_inter_layer_prediction_enabled_flag)
           interLayer = bs.getBit();
@@ -42,21 +44,25 @@ namespace VVC
               readSign = (absDeltaPocSt != 0);
             else
               readSign = (absDeltaPocSt + 1 != 0);
+            int32_t sign = 0;
             if(readSign)
-              bs.getBit(); // strp_entry_sign_flag
+              sign = bs.getBit(); // strp_entry_sign_flag
+            delta = (1 - 2 * sign) * (int32_t)(absDeltaPocSt + 1);
           }
           else
           {
             if(!ltrpInSliceHeader)
               bs.getBits(s.sps_log2_max_pic_order_cnt_lsb_minus4 + 4); // rpls_poc_lsb_lt
+            // 长期参考：此处不解析 msb cycle，delta 保持 INT32_MIN（前端跳过箭头）
           }
         }
         else
         {
-          bs.getGolombU(); // ilrp_idx
+          bs.getGolombU(); // ilrp_idx（层间参考，跳过）
         }
+        deltas.push_back(delta);
       }
-      return numRefEntries;
+      return deltas;
     }
   }
 
@@ -523,43 +529,7 @@ namespace VVC
       s.sps_num_ref_pic_lists[i] = bs.getGolombU();
       for(int j = 0; j < s.sps_num_ref_pic_lists[i]; j++)
       {
-        // ref_pic_list_struct
-        uint32_t numRefEntries = bs.getGolombU();
-        bool ltrpInSliceHeader = false;
-        if(s.sps_long_term_ref_pics_flag && numRefEntries > 0)
-          ltrpInSliceHeader = bs.getBit();
-        for(uint32_t k = 0; k < numRefEntries; k++)
-        {
-          bool interLayer = false;
-          if(s.sps_inter_layer_prediction_enabled_flag)
-            interLayer = bs.getBit();
-          if(!interLayer)
-          {
-            bool stRef = true; // 默认 true
-            if(s.sps_long_term_ref_pics_flag)
-              stRef = bs.getBit();
-            if(stRef)
-            {
-              uint32_t absDeltaPocSt = bs.getGolombU(); // abs_delta_poc_st
-              bool readSign;
-              if((s.sps_weighted_pred_flag || s.sps_weighted_bipred_flag) && k != 0)
-                readSign = (absDeltaPocSt != 0);
-              else
-                readSign = (absDeltaPocSt + 1 != 0);
-              if(readSign)
-                bs.getBit(); // strp_entry_sign_flag
-            }
-            else
-            {
-              if(!ltrpInSliceHeader)
-                bs.getBits(s.sps_log2_max_pic_order_cnt_lsb_minus4 + 4); // rpls_poc_lsb_lt
-            }
-          }
-          else
-          {
-            bs.getGolombU(); // ilrp_idx
-          }
-        }
+        s.sps_ref_poc_delta[i].push_back(readRefPicListStruct(bs, s));
       }
     }
 
@@ -1197,15 +1167,25 @@ namespace VVC
         s.sh_rpl_sps_flag[i] = rplSpsFlag;
         if(rplSpsFlag)
         {
+          uint32_t rplIdx = 0;
           if(spsNumRpl > 1)
           {
             s.sh_rpl_idx_present[i] = 1;
-            s.sh_rpl_idx[i] = bs.getBits(ceilLog2(spsNumRpl)); // rpl_idx
+            rplIdx = bs.getBits(ceilLog2(spsNumRpl)); // rpl_idx
+            s.sh_rpl_idx[i] = rplIdx;
+          }
+          const SPS &sp = psps->sps;
+          uint32_t srcList = (i == 1 && sp.sps_rpl1_same_as_rpl0_flag) ? 0 : i;
+          if(srcList < 2 && rplIdx < sp.sps_ref_poc_delta[srcList].size())
+          {
+            s.sh_ref_poc_delta[i] = sp.sps_ref_poc_delta[srcList][rplIdx];
+            s.sh_num_ref_entries[i] = (uint32_t)s.sh_ref_poc_delta[i].size();
           }
         }
         else
         {
-          s.sh_num_ref_entries[i] = readRefPicListStruct(bs, psps->sps);
+          s.sh_ref_poc_delta[i] = readRefPicListStruct(bs, psps->sps);
+          s.sh_num_ref_entries[i] = (uint32_t)s.sh_ref_poc_delta[i].size();
         }
       }
     }

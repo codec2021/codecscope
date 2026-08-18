@@ -40,6 +40,9 @@ namespace web
     ,m_level(0)
     ,m_profilePresent(false)
     ,m_levelPresent(false)
+    ,m_pocMsb(0)
+    ,m_prevPicOrderCntLsb(0)
+    ,m_pocInitialized(false)
   {
   }
 
@@ -61,6 +64,9 @@ namespace web
     m_level = 0;
     m_profilePresent = false;
     m_levelPresent = false;
+    m_pocMsb = 0;
+    m_prevPicOrderCntLsb = 0;
+    m_pocInitialized = false;
     m_lastSPS.reset();
     m_spsMap.clear();
     m_ppsMap.clear();
@@ -69,6 +75,51 @@ namespace web
   void VvcWebParser::setTotalSize(std::size_t size)
   {
     m_totalSize = size;
+  }
+
+  void VvcWebParser::fillPocAndRefs(NALUEntry &e, const VVC::Slice_NAL *p)
+  {
+    const VVC::Slice &sl = p->slice;
+
+    std::shared_ptr<VVC::SPS_NAL> sps;
+    auto ppsIt = m_ppsMap.find(sl.slice_pic_parameter_set_id);
+    if(ppsIt != m_ppsMap.end())
+    {
+      auto spsIt = m_spsMap.find(ppsIt->second->pps.pps_seq_parameter_set_id);
+      if(spsIt != m_spsMap.end())
+        sps = spsIt->second;
+    }
+    if(!sps)
+      sps = m_lastSPS;
+
+    int pocLsb = (int)sl.slice_pic_order_cnt_lsb;
+    int maxLsb = sps ? (1 << (int)(sps->sps.sps_log2_max_pic_order_cnt_lsb_minus4 + 4)) : 1;
+
+    int msb = m_pocMsb;
+    if(m_pocInitialized)
+    {
+      if(pocLsb < m_prevPicOrderCntLsb && (m_prevPicOrderCntLsb - pocLsb) >= maxLsb / 2)
+        msb += maxLsb;
+      else if(pocLsb > m_prevPicOrderCntLsb && (pocLsb - m_prevPicOrderCntLsb) > maxLsb / 2)
+        msb -= maxLsb;
+    }
+    int pocFull = msb + pocLsb;
+    m_prevPicOrderCntLsb = pocLsb;
+    m_pocMsb = msb;
+    m_pocInitialized = true;
+
+    e.slicePoc = pocFull;
+
+    for(int i = 0; i < 2; i++)
+    {
+      for(std::size_t k = 0; k < sl.sh_ref_poc_delta[i].size(); k++)
+      {
+        int32_t delta = sl.sh_ref_poc_delta[i][k];
+        if(delta == INT32_MIN)
+          continue;
+        e.refPocs.push_back(pocFull + delta);
+      }
+    }
   }
 
   void VvcWebParser::onNALUnit(std::shared_ptr<VVC::NALUnit> pNALUnit, const VVC::Parser::Info *pInfo)
@@ -139,7 +190,7 @@ namespace web
         e.color = "red";
         e.sliceType = 2;
         e.sliceQp = 26 + p->slice.slice_qp_delta;
-        e.slicePoc = p->slice.slice_pic_order_cnt_lsb;
+        fillPocAndRefs(e, p.get());
         e.frameNum = m_frameNum;
         m_INumber++;
         m_frameNum++;
@@ -153,7 +204,7 @@ namespace web
       {
         std::shared_ptr<VVC::Slice_NAL> p = std::dynamic_pointer_cast<VVC::Slice_NAL>(pNALUnit);
         e.sliceQp = 26 + p->slice.slice_qp_delta;
-        e.slicePoc = p->slice.slice_pic_order_cnt_lsb;
+        fillPocAndRefs(e, p.get());
         e.frameNum = m_frameNum;
         switch(p->slice.slice_type)
         {
@@ -254,6 +305,13 @@ namespace web
       out += ",\"sliceQp\":" + std::to_string(m_nalus[i].sliceQp);
       out += ",\"slicePoc\":" + std::to_string(m_nalus[i].slicePoc);
       out += ",\"frameNum\":" + std::to_string(m_nalus[i].frameNum);
+      out += ",\"refPocs\":[";
+      for(std::size_t k = 0; k < m_nalus[i].refPocs.size(); k++)
+      {
+        if(k) out += ",";
+        out += std::to_string(m_nalus[i].refPocs[k]);
+      }
+      out += "]";
       out += "}";
     }
     out += "]";

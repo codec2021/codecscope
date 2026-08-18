@@ -5,6 +5,7 @@
 
 #include <limits>
 #include <sstream>
+#include <algorithm>
 
 namespace web
 {
@@ -116,6 +117,9 @@ namespace web
     ,m_frameNum(0)
     ,m_profilePresent(false)
     ,m_prevSliceType(HEVC::Slice::NONE_SLICE)
+    ,m_pocMsb(0)
+    ,m_prevPicOrderCntLsb(0)
+    ,m_pocInitialized(false)
   {
   }
 
@@ -138,6 +142,10 @@ namespace web
     m_frameNum = 0;
     m_profilePresent = false;
     m_prevSliceType = HEVC::Slice::NONE_SLICE;
+    m_spsRps.clear();
+    m_pocMsb = 0;
+    m_prevPicOrderCntLsb = 0;
+    m_pocInitialized = false;
     m_lastSPS.reset();
     m_masteringDisplayInfo.reset();
     m_cllInfo.reset();
@@ -160,6 +168,125 @@ namespace web
     if(it != m_ppsMap.end() && it->second)
       qp += it->second -> init_qp_minus26;
     return qp;
+  }
+
+  WebParser::RpsDeltas WebParser::deriveRpsDeltas(const HEVC::ShortTermRefPicSet &rps, std::size_t stRpsIdx, const std::vector<RpsDeltas> &derived)
+  {
+    RpsDeltas out;
+
+    if(!rps.inter_ref_pic_set_prediction_flag)
+    {
+      int prev = 0;
+      for(std::size_t i = 0; i < rps.delta_poc_s0_minus1.size(); i++)
+      {
+        prev -= (int)(rps.delta_poc_s0_minus1[i] + 1);
+        out.deltaPoc.push_back(prev);
+        out.used.push_back((i < rps.used_by_curr_pic_s0_flag.size()) ? (uint8_t)rps.used_by_curr_pic_s0_flag[i] : 0);
+      }
+      prev = 0;
+      for(std::size_t i = 0; i < rps.delta_poc_s1_minus1.size(); i++)
+      {
+        prev += (int)(rps.delta_poc_s1_minus1[i] + 1);
+        out.deltaPoc.push_back(prev);
+        out.used.push_back((i < rps.used_by_curr_pic_s1_flag.size()) ? (uint8_t)rps.used_by_curr_pic_s1_flag[i] : 0);
+      }
+      return out;
+    }
+
+    std::size_t refIdx = stRpsIdx - (rps.delta_idx_minus1 + 1);
+    if(refIdx >= derived.size())
+      return out;
+    const RpsDeltas &ref = derived[refIdx];
+
+    int deltaRps = (rps.delta_rps_sign ? -1 : 1) * (int)(rps.abs_delta_rps_minus1 + 1);
+    std::size_t numDelta = ref.deltaPoc.size();
+
+    for(std::size_t i = 0; i <= numDelta; i++)
+    {
+      uint8_t used = (i < rps.used_by_curr_pic_flag.size()) ? (uint8_t)rps.used_by_curr_pic_flag[i] : 0;
+      uint8_t useDelta = used ? 1 : ((i < rps.use_delta_flag.size()) ? (uint8_t)rps.use_delta_flag[i] : 0);
+      if(used || useDelta)
+      {
+        int base = (i < numDelta) ? ref.deltaPoc[i] : 0;
+        out.deltaPoc.push_back(base + deltaRps);
+        out.used.push_back(used);
+      }
+    }
+
+    // 排序（increasing）+ flip 负部分（largest first，与 FFmpeg 顺序一致）
+    std::size_t n = out.deltaPoc.size();
+    for(std::size_t i = 1; i < n; i++)
+    {
+      int d = out.deltaPoc[i];
+      uint8_t u = out.used[i];
+      std::size_t k = i;
+      while(k > 0 && out.deltaPoc[k - 1] > d)
+      {
+        out.deltaPoc[k] = out.deltaPoc[k - 1];
+        out.used[k] = out.used[k - 1];
+        k--;
+      }
+      out.deltaPoc[k] = d;
+      out.used[k] = u;
+    }
+    std::size_t numNeg = 0;
+    for(std::size_t i = 0; i < n; i++)
+      if(out.deltaPoc[i] < 0) numNeg++;
+    for(std::size_t i = 0; i < numNeg / 2; i++)
+    {
+      std::swap(out.deltaPoc[i], out.deltaPoc[numNeg - 1 - i]);
+      std::swap(out.used[i], out.used[numNeg - 1 - i]);
+    }
+
+    return out;
+  }
+
+  void WebParser::fillPocAndRefs(NALUEntry &e, std::shared_ptr<HEVC::Slice> pSlice)
+  {
+    std::shared_ptr<HEVC::SPS> sps;
+    auto ppsIt = m_ppsMap.find(pSlice -> slice_pic_parameter_set_id);
+    if(ppsIt != m_ppsMap.end() && ppsIt->second)
+    {
+      auto spsIt = m_spsMap.find(ppsIt->second -> pps_seq_parameter_set_id);
+      if(spsIt != m_spsMap.end())
+        sps = spsIt->second;
+    }
+    if(!sps)
+      sps = m_lastSPS;
+
+    int pocLsb = (int)pSlice -> slice_pic_order_cnt_lsb;
+    int maxLsb = sps ? (1 << (int)(sps -> log2_max_pic_order_cnt_lsb_minus4 + 4)) : 1;
+
+    int msb = m_pocMsb;
+    if(m_pocInitialized)
+    {
+      if(pocLsb < m_prevPicOrderCntLsb && (m_prevPicOrderCntLsb - pocLsb) >= maxLsb / 2)
+        msb += maxLsb;
+      else if(pocLsb > m_prevPicOrderCntLsb && (pocLsb - m_prevPicOrderCntLsb) > maxLsb / 2)
+        msb -= maxLsb;
+    }
+    int pocFull = msb + pocLsb;
+    m_prevPicOrderCntLsb = pocLsb;
+    m_pocMsb = msb;
+    m_pocInitialized = true;
+
+    e.slicePoc = pocFull;
+
+    RpsDeltas deltas;
+    if(pSlice -> short_term_ref_pic_set_sps_flag)
+    {
+      std::size_t idx = pSlice -> short_term_ref_pic_set_idx;
+      if(idx < m_spsRps.size())
+        deltas = m_spsRps[idx];
+    }
+    else
+    {
+      deltas = deriveRpsDeltas(pSlice -> short_term_ref_pic_set, m_spsRps.size(), m_spsRps);
+    }
+
+    for(std::size_t i = 0; i < deltas.deltaPoc.size(); i++)
+      if(deltas.used[i])
+        e.refPocs.push_back(pocFull + deltas.deltaPoc[i]);
   }
 
   void WebParser::onNALUnit(std::shared_ptr<HEVC::NALUnit> pNALUnit, const HEVC::Parser::Info *pInfo)
@@ -207,6 +334,10 @@ namespace web
         m_profilePresent = true;
         m_lastSPS = pSPS;
         m_spsMap[pSPS -> sps_seq_parameter_set_id] = pSPS;
+        m_spsRps.clear();
+        m_spsRps.reserve(pSPS -> short_term_ref_pic_set.size());
+        for(std::size_t i = 0; i < pSPS -> short_term_ref_pic_set.size(); i++)
+          m_spsRps.push_back(deriveRpsDeltas(pSPS -> short_term_ref_pic_set[i], i, m_spsRps));
         break;
       }
 
@@ -226,7 +357,7 @@ namespace web
         e.info = "IDR Slice #" + std::to_string(m_frameNum);
         e.color = "red";
         e.sliceType = 2; // I
-        e.slicePoc = pSlice -> slice_pic_order_cnt_lsb;
+        fillPocAndRefs(e, pSlice);
         e.sliceQp = calcSliceQp(pSlice);
         e.sliceAddr = pSlice -> slice_segment_address;
         e.firstSlice = pSlice -> first_slice_segment_in_pic_flag;
@@ -253,7 +384,7 @@ namespace web
       case NAL_CRA_NUT:
       {
         std::shared_ptr<Slice> pSlice = std::dynamic_pointer_cast<Slice>(pNALUnit);
-        e.slicePoc = pSlice -> slice_pic_order_cnt_lsb;
+        fillPocAndRefs(e, pSlice);
         e.sliceQp = calcSliceQp(pSlice);
         e.sliceAddr = pSlice -> slice_segment_address;
         e.firstSlice = pSlice -> first_slice_segment_in_pic_flag;
@@ -406,6 +537,13 @@ namespace web
       out += std::to_string(m_nalus[i].slicePoc);
       out += ",\"frameNum\":";
       out += std::to_string(m_nalus[i].frameNum);
+      out += ",\"refPocs\":[";
+      for(std::size_t k = 0; k < m_nalus[i].refPocs.size(); k++)
+      {
+        if(k) out += ",";
+        out += std::to_string(m_nalus[i].refPocs[k]);
+      }
+      out += "]";
       out += "}";
     }
     out += "]";

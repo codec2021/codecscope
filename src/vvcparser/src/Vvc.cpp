@@ -116,6 +116,8 @@ namespace VVC
     sps_idr_rpl_present_flag = 0;
     sps_rpl1_same_as_rpl0_flag = 0;
     memset(sps_num_ref_pic_lists, 0, sizeof(sps_num_ref_pic_lists));
+    sps_ref_poc_delta[0].clear();
+    sps_ref_poc_delta[1].clear();
     sps_ref_wraparound_enabled_flag = 0;
     sps_temporal_mvp_enabled_flag = 0;
     sps_sbtmvp_enabled_flag = 0;
@@ -316,6 +318,8 @@ namespace VVC
     sh_rpl_idx[0] = sh_rpl_idx[1] = 0;
     sh_rpl_idx_present[0] = sh_rpl_idx_present[1] = 0;
     sh_num_ref_entries[0] = sh_num_ref_entries[1] = 0;
+    sh_ref_poc_delta[0].clear();
+    sh_ref_poc_delta[1].clear();
     sh_ref_pic_lists_present = 0;
     sh_rpl1_present = 0;
     sh_num_ref_idx_active_override_flag = 0;

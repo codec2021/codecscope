@@ -33,6 +33,14 @@ namespace web
       std::string serializeNalSyntax(std::size_t index) const;
 
     private:
+      struct RpsDeltas
+      {
+        std::vector<int>     deltaPoc;   // 展开后的 delta POC（FFmpeg 顺序）
+        std::vector<uint8_t> used;       // 对应 used_by_curr_pic_flag
+      };
+
+      static RpsDeltas deriveRpsDeltas(const HEVC::ShortTermRefPicSet &rps, std::size_t stRpsIdx, const std::vector<RpsDeltas> &derived);
+
       struct NALUEntry
       {
         std::size_t                      offset;
@@ -47,8 +55,11 @@ namespace web
         int                              frameNum;
         int                              sliceAddr;
         int                              firstSlice;
+        std::vector<int>                 refPocs;
         std::shared_ptr<HEVC::NALUnit>   nal;
       };
+
+      void fillPocAndRefs(NALUEntry &e, std::shared_ptr<HEVC::Slice> pSlice);
 
       struct WarningEntry
       {
@@ -72,6 +83,11 @@ namespace web
       bool                          m_profilePresent;
 
       HEVC::Slice::SliceType        m_prevSliceType;
+
+      std::vector<RpsDeltas>        m_spsRps;   // SPS 的 RPS 展开（按 stRpsIdx）
+      int                           m_pocMsb;
+      int                           m_prevPicOrderCntLsb;
+      bool                          m_pocInitialized;
 
       std::shared_ptr<HEVC::SPS>                    m_lastSPS;
       std::shared_ptr<HEVC::MasteringDisplayInfo>   m_masteringDisplayInfo;
