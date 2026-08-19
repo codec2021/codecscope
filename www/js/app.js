@@ -39,6 +39,7 @@
 
   var ROW_HEIGHT = 22;
   var timelineZoom = 1;   // 时间轴缩放倍数
+  var selectedSlice = -1; // 时间轴上选中的帧
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function hex8(v) { var s = v.toString(16); while (s.length < 8) s = "0" + s; return "0x" + s; }
@@ -250,34 +251,47 @@
     var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
     var barTop = labelH + arrowH;
 
-    // 参考帧箭头（参考帧 → 当前帧），过去参考偏蓝、未来参考偏橙
-    ctx.lineWidth = 1;
-    for (var i = 0; i < slices.length; i++) {
-      var s = slices[i];
+    function drawArrow(xFrom, xTo, color) {
+      var dist = Math.abs(xTo - xFrom);
+      var arc = Math.max(12, Math.min(58, dist * 0.2));
+      var mid = (xFrom + xTo) / 2;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(xFrom, barTop);
+      ctx.quadraticCurveTo(mid, barTop - arc, xTo, barTop);
+      ctx.stroke();
+      // 箭头头部（指向 xTo）
+      var dir = xTo >= xFrom ? 1 : -1;
+      var hs = 5;
+      ctx.beginPath();
+      ctx.moveTo(xTo, barTop);
+      ctx.lineTo(xTo - dir * hs, barTop - hs * 0.7);
+      ctx.lineTo(xTo - dir * hs, barTop + hs * 0.7);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 只画选中帧的参考关系（出：它参考谁；入：谁参考它）
+    if (selectedSlice >= 0 && selectedSlice < slices.length) {
+      var s = slices[selectedSlice];
+      var xs = selectedSlice * barW + barW / 2;
+      // 出箭头：参考帧 → 选中帧
       for (var r = 0; r < s.refs.length; r++) {
         var j = pocMap[s.refs[r]];
-        if (j === undefined || j === i) continue;
-        var x1 = i * barW + barW / 2;   // 当前帧
-        var x2 = j * barW + barW / 2;   // 参考帧
+        if (j === undefined || j === selectedSlice) continue;
+        var x2 = j * barW + barW / 2;
         var toFuture = (s.refs[r] > s.poc);
-        var col = toFuture ? "rgba(255,140,40,0.75)" : "rgba(80,160,255,0.7)";
-        ctx.strokeStyle = col;
-        ctx.fillStyle = col;
-        var dist = Math.abs(x1 - x2);
-        var arc = Math.max(10, Math.min(52, dist * 0.18));
-        var mid = (x1 + x2) / 2;
-        ctx.beginPath();
-        ctx.moveTo(x2, barTop);
-        ctx.quadraticCurveTo(mid, barTop - arc, x1, barTop);
-        ctx.stroke();
-        // 箭头头部（指向当前帧 x1）
-        var hs = 4;
-        ctx.beginPath();
-        ctx.moveTo(x1, barTop);
-        ctx.lineTo(x1 - hs * 0.9, barTop - hs * 0.6);
-        ctx.lineTo(x1 - hs * 0.9, barTop + hs * 0.6);
-        ctx.closePath();
-        ctx.fill();
+        drawArrow(x2, xs, toFuture ? "rgba(255,140,40,0.9)" : "rgba(80,160,255,0.9)");
+      }
+      // 入箭头：选中帧 → 参考它的帧
+      for (var j2 = 0; j2 < slices.length; j2++) {
+        if (j2 === selectedSlice) continue;
+        if (slices[j2].refs.indexOf(s.poc) >= 0) {
+          var xj = j2 * barW + barW / 2;
+          drawArrow(xs, xj, "rgba(0,200,120,0.8)");
+        }
       }
     }
 
@@ -297,6 +311,13 @@
         ctx.fillText(String(s.poc), x + 1, labelH - 7);  // POC
       }
     }
+    // 高亮选中帧
+    if (selectedSlice >= 0 && selectedSlice < slices.length) {
+      var hx = selectedSlice * barW;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(hx + 0.5, barTop + 0.5, Math.max(1, barW - 1), barH - 1);
+    }
     timeline._slices = slices;
     timeline._barW = barW;
     timeline._labelH = labelH;
@@ -304,8 +325,10 @@
     var legend = document.getElementById("timelineLegend");
     legend.innerHTML =
       '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b>' +
-      ' <span style="color:#50a0ff">◂</span><span style="color:var(--text-dim)">过去参考</span>' +
-      ' <span style="color:#ff8c28">▸</span><span style="color:var(--text-dim)">未来参考</span>' +
+      ' <span style="color:#50a0ff">◂</span><span style="color:var(--text-dim)">参考过去</span>' +
+      ' <span style="color:#ff8c28">▸</span><span style="color:var(--text-dim)">参考未来</span>' +
+      ' <span style="color:#00c878">▸</span><span style="color:var(--text-dim)">被参考</span>' +
+      ' <span style="color:var(--text-dim)">｜点击帧查看其参考关系</span>' +
       ' <span style="color:var(--text-dim)">｜缩放</span>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>';
@@ -345,7 +368,9 @@
      var x = e.clientX - rect.left;
      var idx = Math.floor(x / timeline._barW);
      if (idx >= 0 && idx < timeline._slices.length) {
+       selectedSlice = idx;
        selectNal(timeline._slices[idx].index, true);
+       renderTimeline();
        previewFrame(idx);
      }
    });
@@ -406,22 +431,17 @@
       var sps = removeEmulationPrevention(nalData(currentData.nalus[si]));
       var pps = removeEmulationPrevention(nalData(currentData.nalus[pi]));
       if (sps.length < 4) return null;
-      var desc = new Uint8Array(6 + sps.length + 1 + 2 + pps.length);
-      var o = 0;
-      desc[o++] = 1;                       // configurationVersion
-      desc[o++] = sps[1];                  // AVCProfileIndication
-      desc[o++] = sps[2];                  // profile_compatibility
-      desc[o++] = sps[3];                  // AVCLevelIndication
-      desc[o++] = 0xFF;                    // lengthSizeMinusOne(3) = 0xFF
-      desc[o++] = 0xE1;                    // numOfSequenceParameterSets(1) = 0xE1
-      desc[o++] = (sps.length >> 8) & 0xFF;
-      desc[o++] = sps.length & 0xFF;
-      desc.set(sps, o); o += sps.length;
-      desc[o++] = 1;                       // numOfPictureParameterSets
-      desc[o++] = (pps.length >> 8) & 0xFF;
-      desc[o++] = pps.length & 0xFF;
-      desc.set(pps, o);
-      return desc;
+      var b = [];
+      b.push(1);                              // configurationVersion
+      b.push(sps[1], sps[2], sps[3]);         // profile / compat / level
+      b.push(0xFF);                           // lengthSizeMinusOne = 3
+      b.push(0xE1);                           // numOfSequenceParameterSets = 1
+      b.push((sps.length >> 8) & 0xFF, sps.length & 0xFF);
+      for (var i = 0; i < sps.length; i++) b.push(sps[i]);
+      b.push(1);                              // numOfPictureParameterSets
+      b.push((pps.length >> 8) & 0xFF, pps.length & 0xFF);
+      for (var i2 = 0; i2 < pps.length; i2++) b.push(pps[i2]);
+      return new Uint8Array(b);
     }
     if (currentCodec === "hevc") {
       var vi = findNalByType(32), si = findNalByType(33), pi = findNalByType(34);
@@ -430,8 +450,7 @@
       var pps = removeEmulationPrevention(nalData(currentData.nalus[pi]));
       var vps = vi >= 0 ? removeEmulationPrevention(nalData(currentData.nalus[vi])) : new Uint8Array(0);
       if (sps.length < 4) return null;
-      // 从 SPS 解析 profile_tier_level（跳过 2 字节 NAL header）
-      var b1 = sps[3]; // profile_space(2) + tier(1) + profile_idc(5)
+      var b1 = sps[3];
       var profileSpace = (b1 >> 6) & 3;
       var tierFlag = (b1 >> 5) & 1;
       var profileIdc = b1 & 0x1F;
@@ -439,48 +458,34 @@
       var constraint = 0;
       for (var c = 0; c < 6; c++) constraint = (constraint << 8) | sps[8 + c];
       var levelIdc = sps[14];
-      // 构建 hvcC
-      var arrays = [];
-      var nalTypes = [];
+      var cf = (currentData.streamInfo && currentData.streamInfo.chromaFormat) || 1;
+      var bd = ((currentData.streamInfo && currentData.streamInfo.bitDepth) || 8) - 8;
+      var b = [];
+      b.push(1);                              // configurationVersion
+      b.push((profileSpace << 6) | (tierFlag << 5) | profileIdc);
+      b.push((compat >> 24) & 0xFF, (compat >> 16) & 0xFF, (compat >> 8) & 0xFF, compat & 0xFF);
+      b.push((constraint >> 40) & 0xFF, (constraint >> 32) & 0xFF, (constraint >> 24) & 0xFF,
+             (constraint >> 16) & 0xFF, (constraint >> 8) & 0xFF, constraint & 0xFF);
+      b.push(levelIdc);
+      b.push(0xF0, 0x00);                     // min_spatial_segmentation_idc (2 bytes)
+      b.push(0x00);                           // parallelismType
+      b.push(0xFC | (cf & 3));                // chromaFormat
+      b.push(0xF8 | (bd & 7));                // bitDepthLumaMinus8
+      b.push(0xF8 | (bd & 7));                // bitDepthChromaMinus8
+      b.push(0x00, 0x00);                     // avgFrameRate
+      b.push(0x0F);                           // constantFrameRate/temporal/lengthSizeMinusOne
+      var arrays = [], nalTypes = [];
       if (vps.length) { arrays.push(vps); nalTypes.push(32); }
       arrays.push(sps); nalTypes.push(33);
       arrays.push(pps); nalTypes.push(34);
-      var headerLen = 23;
-      var bodyLen = 0;
-      for (var a = 0; a < arrays.length; a++) bodyLen += 3 + arrays[a].length;
-      var desc = new Uint8Array(headerLen + bodyLen);
-      var o = 0;
-      desc[o++] = 1; // configurationVersion
-      desc[o++] = (profileSpace << 6) | (tierFlag << 5) | profileIdc;
-      desc[o++] = (compat >> 24) & 0xFF;
-      desc[o++] = (compat >> 16) & 0xFF;
-      desc[o++] = (compat >> 8) & 0xFF;
-      desc[o++] = compat & 0xFF;
-      desc[o++] = (constraint >> 40) & 0xFF;
-      desc[o++] = (constraint >> 32) & 0xFF;
-      desc[o++] = (constraint >> 24) & 0xFF;
-      desc[o++] = (constraint >> 16) & 0xFF;
-      desc[o++] = (constraint >> 8) & 0xFF;
-      desc[o++] = constraint & 0xFF;
-      desc[o++] = levelIdc;
-      desc[o++] = 0xF0; // min_spatial_segmentation_idc = 0
-      desc[o++] = 0x00; // parallelismType
-      var cf = (currentData.streamInfo && currentData.streamInfo.chromaFormat) || 1;
-      var bd = ((currentData.streamInfo && currentData.streamInfo.bitDepth) || 8) - 8;
-      desc[o++] = 0xFC | (cf & 3); // chromaFormat
-      desc[o++] = 0xF8 | (bd & 7); // bitDepthLumaMinus8
-      desc[o++] = 0xF8 | (bd & 7); // bitDepthChromaMinus8
-      desc[o++] = 0x00; desc[o++] = 0x00; // avgFrameRate
-      desc[o++] = 0x0F; // constantFrameRate(2)=0, numTemporalLayers(3)=1, temporalIdNested(1)=1, lengthSizeMinusOne(2)=3
-      desc[o++] = arrays.length; // numOfArrays
+      b.push(arrays.length);                  // numOfArrays
       for (var a = 0; a < arrays.length; a++) {
-        desc[o++] = (0x80) | (nalTypes[a] & 0x3F); // array_completeness=1, NAL_unit_type
-        desc[o++] = 0x00; desc[o++] = 0x01; // numNalus = 1
-        desc[o++] = (arrays[a].length >> 8) & 0xFF;
-        desc[o++] = arrays[a].length & 0xFF;
-        desc.set(arrays[a], o); o += arrays[a].length;
+        b.push(0x80 | (nalTypes[a] & 0x3F));  // array_completeness + NAL_unit_type
+        b.push(0x00, 0x01);                   // numNalus = 1
+        b.push((arrays[a].length >> 8) & 0xFF, arrays[a].length & 0xFF);
+        for (var i3 = 0; i3 < arrays[a].length; i3++) b.push(arrays[a][i3]);
       }
-      return desc;
+      return new Uint8Array(b);
     }
     return null;
   }
@@ -584,9 +589,10 @@
     previewMsg.textContent = "";
 
     var cs = codecString();
+    if (!cs) { previewMsg.textContent = "无法确定 codec 字符串"; return; }
     VideoDecoder.isConfigSupported({ codec: cs, description: desc }).then(function (support) {
       if (!support.supported) {
-        previewMsg.textContent = "当前浏览器不支持解码 " + cs;
+        previewMsg.textContent = "当前浏览器不支持解码 " + cs + "（" + (currentCodec === "hevc" ? "H.265 可能受硬件/许可限制" : "H.264") + "）";
         previewHint.textContent = "";
         return;
       }
@@ -619,6 +625,9 @@
       try { feed(); } catch (err) {
         previewMsg.textContent = "解码失败：" + err.message;
       }
+    }).catch(function (err) {
+      previewMsg.textContent = "配置失败：" + err.message;
+      previewHint.textContent = "";
     });
   }
 
@@ -735,6 +744,7 @@
         renderNalTable();
         renderHdr(currentData.hdr);
         renderWarnings();
+        selectedSlice = -1;
         renderTimeline();
         syntaxTree.innerHTML = "";
         syntaxTitle.textContent = "";
