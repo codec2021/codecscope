@@ -52,11 +52,16 @@
   function readU16(d, o) { return (d[o] << 8) | d[o + 1]; }
   function fourCC(d, o) { return String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]); }
   function isMp4(d) { return d.length >= 12 && fourCC(d, 4) === "ftyp"; }
+  function boxSize(d, o) {
+    var size = readU32(d, o);
+    if (size === 1) return readU32(d, o + 8) * 4294967296 + readU32(d, o + 12); // 64-bit largesize
+    return size;
+  }
 
   function findBox(d, start, end, type) {
     var i = start;
     while (i + 8 <= end) {
-      var size = readU32(d, i);
+      var size = boxSize(d, i);
       if (size < 8 || i + size > end) break;
       if (fourCC(d, i + 4) === type) return { offset: i, size: size };
       i += size;
@@ -85,8 +90,8 @@
     var moov = null;
     var i = 0;
     while (i + 8 <= d.length) {
-      var size = readU32(d, i);
-      if (size < 8) break;
+      var size = boxSize(d, i);
+      if (size < 8 || i + size > d.length) break;
       if (fourCC(d, i + 4) === "moov") { moov = { offset: i + 8, end: i + size }; break; }
       i += size;
     }
@@ -96,7 +101,7 @@
     var trakStart = moov.offset;
     var result = null;
     while (trakStart + 8 <= moov.end && !result) {
-      var trakSize = readU32(d, trakStart);
+      var trakSize = boxSize(d, trakStart);
       if (trakSize < 8) break;
       if (fourCC(d, trakStart + 4) === "trak") {
         var trakEnd = trakStart + trakSize;
@@ -232,24 +237,31 @@
       dataOffset = 0;
     }
 
-    // 组装 Annex B 裸流（用数组收集，避免 addEP 膨胀导致越界）
-    var annexbArr = [];
-    var paramAnnexb = nalToAnnexB(paramNals);
-    for (var pi = 0; pi < paramAnnexb.length; pi++) annexbArr.push(paramAnnexb[pi]);
+    // 组装 Annex B 裸流：先收集 NAL 列表（subarray 引用，不复制），再一次性分配
+    var nalList = [];
+    for (var pn = 0; pn < paramNals.length; pn++) nalList.push(paramNals[pn]);
     for (var si2 = 0; si2 < sampleOffsets.length; si2++) {
       var sample = d.subarray(sampleOffsets[si2], sampleOffsets[si2] + sampleSizes[si2]);
       var p2 = 0;
       while (p2 + 4 <= sample.length) {
         var nlen = (sample[p2] << 24) | (sample[p2 + 1] << 16) | (sample[p2 + 2] << 8) | sample[p2 + 3];
         p2 += 4;
-        if (p2 + nlen > sample.length) break;
-        var nal = sample.subarray(p2, p2 + nlen);
-        annexbArr.push(0, 0, 0, 1);
-        for (var k2 = 0; k2 < nal.length; k2++) annexbArr.push(nal[k2]);
+        if (nlen < 0 || p2 + nlen > sample.length) break;
+        nalList.push(sample.subarray(p2, p2 + nlen));
         p2 += nlen;
       }
     }
-    return { codec: codec, annexb: new Uint8Array(annexbArr) };
+    var totalSize = 0;
+    for (var q = 0; q < nalList.length; q++) totalSize += nalList[q].length + 4;
+    var out = new Uint8Array(totalSize);
+    var w = 0;
+    for (var q2 = 0; q2 < nalList.length; q2++) {
+      out[w] = 0; out[w + 1] = 0; out[w + 2] = 0; out[w + 3] = 1;
+      w += 4;
+      out.set(nalList[q2], w);
+      w += nalList[q2].length;
+    }
+    return { codec: codec, annexb: out };
   }
 
   // ---------- WASM 封装 ----------
