@@ -32,7 +32,7 @@
   var warningCount = document.getElementById("warningCount");
   var warningFilter = document.getElementById("warningFilter");
   var timeline = document.getElementById("timeline");
-  var previewPanel = document.getElementById("previewPanel");
+  var previewView = document.getElementById("previewView");
   var previewCanvas = document.getElementById("previewCanvas");
   var previewMsg = document.getElementById("previewMsg");
   var previewHint = document.getElementById("previewHint");
@@ -389,19 +389,6 @@
     return fileBytes.subarray(off + startLen, off + len);
   }
 
-  function removeEmulationPrevention(data) {
-    var out = [];
-    for (var i = 0; i < data.length; i++) {
-      if (i + 2 < data.length && data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 3) {
-        out.push(0, 0);
-        i += 2;
-      } else {
-        out.push(data[i]);
-      }
-    }
-    return new Uint8Array(out);
-  }
-
   function isVclNal(type) {
     if (currentCodec === "avc") return type === 1 || type === 5;
     if (currentCodec === "hevc") return type <= 31;
@@ -412,82 +399,11 @@
     if (currentCodec === "hevc") return type === 16 || type === 17 || type === 18 || type === 19 || type === 20 || type === 21;
     return false;
   }
-  function isPrefixNal(type) {
-    if (currentCodec === "avc") return type === 6 || type === 9;
-    if (currentCodec === "hevc") return type === 35 || type === 39 || type === 40;
-    return false;
-  }
 
   function findNalByType(type) {
     for (var i = 0; i < currentData.nalus.length; i++)
       if (currentData.nalus[i].type === type) return i;
     return -1;
-  }
-
-  function buildDescription() {
-    if (currentCodec === "avc") {
-      var si = findNalByType(7), pi = findNalByType(8);
-      if (si < 0 || pi < 0) return null;
-      var sps = removeEmulationPrevention(nalData(currentData.nalus[si]));
-      var pps = removeEmulationPrevention(nalData(currentData.nalus[pi]));
-      if (sps.length < 4) return null;
-      var b = [];
-      b.push(1);                              // configurationVersion
-      b.push(sps[1], sps[2], sps[3]);         // profile / compat / level
-      b.push(0xFF);                           // lengthSizeMinusOne = 3
-      b.push(0xE1);                           // numOfSequenceParameterSets = 1
-      b.push((sps.length >> 8) & 0xFF, sps.length & 0xFF);
-      for (var i = 0; i < sps.length; i++) b.push(sps[i]);
-      b.push(1);                              // numOfPictureParameterSets
-      b.push((pps.length >> 8) & 0xFF, pps.length & 0xFF);
-      for (var i2 = 0; i2 < pps.length; i2++) b.push(pps[i2]);
-      return new Uint8Array(b);
-    }
-    if (currentCodec === "hevc") {
-      var vi = findNalByType(32), si = findNalByType(33), pi = findNalByType(34);
-      if (si < 0 || pi < 0) return null;
-      var sps = removeEmulationPrevention(nalData(currentData.nalus[si]));
-      var pps = removeEmulationPrevention(nalData(currentData.nalus[pi]));
-      var vps = vi >= 0 ? removeEmulationPrevention(nalData(currentData.nalus[vi])) : new Uint8Array(0);
-      if (sps.length < 4) return null;
-      var b1 = sps[3];
-      var profileSpace = (b1 >> 6) & 3;
-      var tierFlag = (b1 >> 5) & 1;
-      var profileIdc = b1 & 0x1F;
-      var compat = (sps[4] << 24) | (sps[5] << 16) | (sps[6] << 8) | sps[7];
-      var constraint = 0;
-      for (var c = 0; c < 6; c++) constraint = (constraint << 8) | sps[8 + c];
-      var levelIdc = sps[14];
-      var cf = (currentData.streamInfo && currentData.streamInfo.chromaFormat) || 1;
-      var bd = ((currentData.streamInfo && currentData.streamInfo.bitDepth) || 8) - 8;
-      var b = [];
-      b.push(1);                              // configurationVersion
-      b.push((profileSpace << 6) | (tierFlag << 5) | profileIdc);
-      b.push((compat >> 24) & 0xFF, (compat >> 16) & 0xFF, (compat >> 8) & 0xFF, compat & 0xFF);
-      b.push((constraint >> 40) & 0xFF, (constraint >> 32) & 0xFF, (constraint >> 24) & 0xFF,
-             (constraint >> 16) & 0xFF, (constraint >> 8) & 0xFF, constraint & 0xFF);
-      b.push(levelIdc);
-      b.push(0xF0, 0x00);                     // min_spatial_segmentation_idc (2 bytes)
-      b.push(0x00);                           // parallelismType
-      b.push(0xFC | (cf & 3));                // chromaFormat
-      b.push(0xF8 | (bd & 7));                // bitDepthLumaMinus8
-      b.push(0xF8 | (bd & 7));                // bitDepthChromaMinus8
-      b.push(0x00, 0x00);                     // avgFrameRate
-      b.push(0x0F);                           // constantFrameRate/temporal/lengthSizeMinusOne
-      var arrays = [], nalTypes = [];
-      if (vps.length) { arrays.push(vps); nalTypes.push(32); }
-      arrays.push(sps); nalTypes.push(33);
-      arrays.push(pps); nalTypes.push(34);
-      b.push(arrays.length);                  // numOfArrays
-      for (var a = 0; a < arrays.length; a++) {
-        b.push(0x80 | (nalTypes[a] & 0x3F));  // array_completeness + NAL_unit_type
-        b.push(0x00, 0x01);                   // numNalus = 1
-        b.push((arrays[a].length >> 8) & 0xFF, arrays[a].length & 0xFF);
-        for (var i3 = 0; i3 < arrays[a].length; i3++) b.push(arrays[a][i3]);
-      }
-      return new Uint8Array(b);
-    }
-    return null;
   }
 
   function codecString() {
@@ -496,7 +412,7 @@
       if (si < 0) return null;
       var sps = nalData(currentData.nalus[si]);
       function hx(v) { var s = v.toString(16); return (s.length < 2 ? "0" : "") + s; }
-      return "avc1." + hx(sps[1]) + hx(sps[2]) + hx(sps[3]);
+      return "avc3." + hx(sps[1]) + hx(sps[2]) + hx(sps[3]);
     }
     if (currentCodec === "hevc") {
       var si = findNalByType(33);
@@ -518,35 +434,30 @@
 
   function extractAccessUnits(keyIdx, targetIdx) {
     var units = [];
-    var prefix = []; // 当前 AU 的前缀 NAL（SEI/AUD）
-    for (var i = keyIdx; i <= targetIdx; i++) {
-      var n = currentData.nalus[i];
-      if (isVclNal(n.type)) {
-        // 组装一个 AU：前缀 + 当前 VCL
-        var nals = prefix.concat([i]);
-        var datas = [];
-        var len = 0;
-        for (var k = 0; k < nals.length; k++) {
-          var nd = removeEmulationPrevention(nalData(currentData.nalus[nals[k]]));
-          datas.push(nd);
-          len += 4 + nd.length;
-        }
-        var data = new Uint8Array(len);
-        var o = 0;
-        for (var k2 = 0; k2 < datas.length; k2++) {
-          var nd = datas[k2];
-          data[o++] = (nd.length >> 24) & 0xFF;
-          data[o++] = (nd.length >> 16) & 0xFF;
-          data[o++] = (nd.length >> 8) & 0xFF;
-          data[o++] = nd.length & 0xFF;
-          data.set(nd, o); o += nd.length;
-        }
-        units.push({ data: data, poc: n.slicePoc, isKey: isKeyNal(n.type) });
-        prefix = [];
-      } else if (isPrefixNal(n.type)) {
-        prefix.push(i);
+    var paramTypes = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
+    var paramIdx = [];
+    for (var i = 0; i < currentData.nalus.length; i++)
+      if (paramTypes.indexOf(currentData.nalus[i].type) >= 0) paramIdx.push(i);
+
+    function makeAu(nalIdxs, pocNalIdx) {
+      var len = 0;
+      for (var k = 0; k < nalIdxs.length; k++) len += currentData.nalus[nalIdxs[k]].length;
+      var data = new Uint8Array(len);
+      var o = 0;
+      for (var k2 = 0; k2 < nalIdxs.length; k2++) {
+        var nal = currentData.nalus[nalIdxs[k2]];
+        data.set(fileBytes.subarray(nal.offset, nal.offset + nal.length), o);
+        o += nal.length;
       }
+      return { data: data, poc: currentData.nalus[pocNalIdx].slicePoc, isKey: isKeyNal(currentData.nalus[pocNalIdx].type) };
     }
+
+    // 关键帧 AU = 参数集(SPS/PPS/VPS) + 关键帧 slice（原始 Annex B 字节）
+    units.push(makeAu(paramIdx.concat([keyIdx]), keyIdx));
+    // 后续 AU = 每个 slice 的原始 Annex B 字节
+    for (var i = keyIdx + 1; i <= targetIdx; i++)
+      if (isVclNal(currentData.nalus[i].type))
+        units.push(makeAu([i], i));
     return units;
   }
 
@@ -564,10 +475,12 @@
   function previewFrame(sliceIndex) {
     if (!fileBytes || !currentData || !timeline._slices) return;
     if (currentCodec === "vvc") {
+      showTab("preview");
       previewMsg.textContent = "H.266 (VVC) 暂无法在浏览器中解码";
       return;
     }
     if (!("VideoDecoder" in window)) {
+      showTab("preview");
       previewMsg.textContent = "当前浏览器不支持 WebCodecs";
       return;
     }
@@ -579,18 +492,17 @@
       if (isKeyNal(currentData.nalus[i].type)) { keyIdx = i; break; }
     if (keyIdx < 0) { previewMsg.textContent = "未找到关键帧"; return; }
 
-    var desc = buildDescription();
-    if (!desc) { previewMsg.textContent = "缺少 SPS/PPS"; return; }
-
     var units = extractAccessUnits(keyIdx, targetNalIndex);
     if (!units.length) { previewMsg.textContent = "无解码数据"; return; }
 
     previewHint.textContent = "解码中…（POC " + target.poc + "）";
     previewMsg.textContent = "";
+    showTab("preview");
 
     var cs = codecString();
     if (!cs) { previewMsg.textContent = "无法确定 codec 字符串"; return; }
-    VideoDecoder.isConfigSupported({ codec: cs, description: desc }).then(function (support) {
+    // Annex B 裸流：无 description，直接喂原始字节
+    VideoDecoder.isConfigSupported({ codec: cs }).then(function (support) {
       if (!support.supported) {
         previewMsg.textContent = "当前浏览器不支持解码 " + cs + "（" + (currentCodec === "hevc" ? "H.265 可能受硬件/许可限制" : "H.264") + "）";
         previewHint.textContent = "";
@@ -610,7 +522,7 @@
           previewHint.textContent = "";
         }
       });
-      previewDecoder.configure({ codec: cs, description: desc, optimizeForLatency: true });
+      previewDecoder.configure({ codec: cs, optimizeForLatency: true });
       var idx = 0;
       function feed() {
         if (idx >= units.length || previewDecoder.state !== "configured") return;
@@ -703,15 +615,21 @@
 
   // tab 切换
   var tabSyntax = document.getElementById("tabSyntax");
+  var tabPreview = document.getElementById("tabPreview");
   var tabHex = document.getElementById("tabHex");
-  tabSyntax.addEventListener("click", function () {
-    tabSyntax.classList.add("active"); tabHex.classList.remove("active");
-    syntaxTree.classList.remove("hidden"); hexView.classList.add("hidden");
-  });
-  tabHex.addEventListener("click", function () {
-    tabHex.classList.add("active"); tabSyntax.classList.remove("active");
-    hexView.classList.remove("hidden"); syntaxTree.classList.add("hidden");
-  });
+
+  function showTab(which) {
+    tabSyntax.classList.toggle("active", which === "syntax");
+    tabPreview.classList.toggle("active", which === "preview");
+    tabHex.classList.toggle("active", which === "hex");
+    syntaxTree.classList.toggle("hidden", which !== "syntax");
+    previewView.classList.toggle("hidden", which !== "preview");
+    hexView.classList.toggle("hidden", which !== "hex");
+  }
+
+  tabSyntax.addEventListener("click", function () { showTab("syntax"); });
+  tabPreview.addEventListener("click", function () { showTab("preview"); });
+  tabHex.addEventListener("click", function () { showTab("hex"); });
 
   // ---------- 文件处理 ----------
   function handleFile(file) {
@@ -736,7 +654,6 @@
         resetBtn.classList.remove("hidden");
         statsBar.classList.remove("hidden");
         timelinePanel.classList.remove("hidden");
-        if (currentCodec === "avc" || currentCodec === "hevc") previewPanel.classList.remove("hidden");
         mainArea.classList.remove("hidden");
         bottomPanels.classList.remove("hidden");
 
@@ -779,7 +696,6 @@
     statsBar.classList.add("hidden");
     statsBar.innerHTML = "";
     timelinePanel.classList.add("hidden");
-    previewPanel.classList.add("hidden");
     if (previewDecoder && previewDecoder.state !== "closed") previewDecoder.close();
     previewDecoder = null;
     mainArea.classList.add("hidden");
@@ -792,10 +708,9 @@
     syntaxTree.innerHTML = "";
     syntaxTitle.textContent = "";
     hexView.innerHTML = "";
-    hexView.classList.add("hidden");
-    syntaxTree.classList.remove("hidden");
-    tabSyntax.classList.add("active");
-    tabHex.classList.remove("active");
+    previewMsg.textContent = "点击时间轴上的帧查看画面";
+    previewHint.textContent = "";
+    showTab("syntax");
     hdrInfo.innerHTML = "";
     warningBody.innerHTML = "";
     warningCount.textContent = "";
