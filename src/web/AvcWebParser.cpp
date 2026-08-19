@@ -52,9 +52,7 @@ namespace web
     ,m_levelPresent(false)
     ,m_pocMsb(0)
     ,m_prevPicOrderCntLsb(0)
-    ,m_prevFrameNum(0)
     ,m_pocInitialized(false)
-    ,m_maxFrameNum(0)
   {
   }
 
@@ -76,12 +74,9 @@ namespace web
     m_level = 0;
     m_profilePresent = false;
     m_levelPresent = false;
-    m_dpb.clear();
     m_pocMsb = 0;
     m_prevPicOrderCntLsb = 0;
-    m_prevFrameNum = 0;
     m_pocInitialized = false;
-    m_maxFrameNum = 0;
     m_lastSPS.reset();
     m_spsMap.clear();
     m_ppsMap.clear();
@@ -96,8 +91,6 @@ namespace web
   {
     const AVC::Slice &sl = p->slice;
     bool idr = (p->m_nalHeader.nal_unit_type == AVC::NAL_IDR_SLICE);
-    bool isB = (sl.slice_type % 5 == 1);
-    bool isI = (sl.slice_type % 5 == 2) || (sl.slice_type % 5 == 4);
 
     std::shared_ptr<AVC::SPS_NAL> sps;
     auto ppsIt = m_ppsMap.find(sl.pic_parameter_set_id);
@@ -111,8 +104,6 @@ namespace web
       sps = m_lastSPS;
 
     int maxLsb = sps ? (1 << (int)(sps->sps.log2_max_pic_order_cnt_lsb_minus4 + 4)) : 1;
-    int maxFrameNum = sps ? (1 << (int)(sps->sps.log2_max_frame_num_minus4 + 4)) : 1;
-    m_maxFrameNum = maxFrameNum;
 
     // ---- POC（pic_order_cnt_type 0）----
     int poc = 0;
@@ -140,124 +131,6 @@ namespace web
       m_pocInitialized = true;
     }
     e.slicePoc = poc;
-
-    // ---- frame_num 展开（PicNum）----
-    int frameNum = (int)sl.frame_num;
-    int frameNumWrap = frameNum;
-    if(!idr && frameNum < m_prevFrameNum)
-      frameNumWrap += maxFrameNum;
-
-    // ---- 构建 ref_pic_list ----
-    if(!idr && !isI)
-    {
-      std::vector<const RefPic*> shortTerm;
-      for(const auto &r : m_dpb)
-        if(r.longTermFrameIdx < 0)
-          shortTerm.push_back(&r);
-
-      std::vector<const RefPic*> list0, list1;
-
-      if(isB)
-      {
-        std::vector<const RefPic*> less, more;
-        for(const auto *r : shortTerm)
-        {
-          if(r->picNum < frameNumWrap) less.push_back(r);
-          else if(r->picNum > frameNumWrap) more.push_back(r);
-        }
-        std::sort(less.begin(), less.end(), [](const RefPic *a, const RefPic *b){ return a->picNum > b->picNum; });
-        std::sort(more.begin(), more.end(), [](const RefPic *a, const RefPic *b){ return a->picNum > b->picNum; });
-        list0.insert(list0.end(), less.begin(), less.end());
-        list0.insert(list0.end(), more.begin(), more.end());
-
-        std::sort(more.begin(), more.end(), [](const RefPic *a, const RefPic *b){ return a->picNum < b->picNum; });
-        std::sort(less.begin(), less.end(), [](const RefPic *a, const RefPic *b){ return a->picNum < b->picNum; });
-        list1.insert(list1.end(), more.begin(), more.end());
-        list1.insert(list1.end(), less.begin(), less.end());
-      }
-      else
-      {
-        list0 = shortTerm;
-        std::sort(list0.begin(), list0.end(), [](const RefPic *a, const RefPic *b){ return a->picNum > b->picNum; });
-      }
-
-      // ---- ref_pic_list_reordering ----
-      const AVC::RefPicListModification &mod = sl.ref_pic_list_modification;
-      auto reorder = [&](std::vector<const RefPic*> &list, bool l0)
-      {
-        if(l0 ? !mod.ref_pic_list_modification_flag_l0 : !mod.ref_pic_list_modification_flag_l1)
-          return;
-        const std::vector<uint32_t> &idc   = l0 ? mod.modification_of_pic_nums_idc_l0 : mod.modification_of_pic_nums_idc_l1;
-        const std::vector<uint32_t> &absdiff = l0 ? mod.abs_diff_pic_num_minus1_l0 : mod.abs_diff_pic_num_minus1_l1;
-        int picNumPred = frameNumWrap;
-        std::size_t refIdx = 0;
-        for(std::size_t i = 0; i < idc.size() && refIdx < list.size(); i++)
-        {
-          if(idc[i] == 3)
-            break;
-          if(idc[i] == 0 || idc[i] == 1)
-          {
-            int target = (idc[i] == 0) ? picNumPred - (int)(absdiff[i] + 1) : picNumPred + (int)(absdiff[i] + 1);
-            picNumPred = target;
-            for(std::size_t k = refIdx; k < list.size(); k++)
-              if(list[k]->picNum == target)
-              {
-                std::swap(list[refIdx], list[k]);
-                break;
-              }
-            refIdx++;
-          }
-        }
-      };
-      reorder(list0, true);
-      if(isB)
-        reorder(list1, false);
-
-      for(const auto *r : list0)
-        e.refPocs.push_back(r->poc);
-      if(isB)
-        for(const auto *r : list1)
-          e.refPocs.push_back(r->poc);
-
-      std::sort(e.refPocs.begin(), e.refPocs.end());
-      e.refPocs.erase(std::unique(e.refPocs.begin(), e.refPocs.end()), e.refPocs.end());
-    }
-
-    // ---- DPB 更新 ----
-    if(idr)
-    {
-      m_dpb.clear();
-      RefPic cur;
-      cur.picNum = frameNumWrap;
-      cur.poc = poc;
-      cur.longTermFrameIdx = -1;
-      m_dpb.push_back(cur);
-      m_prevFrameNum = frameNum;
-    }
-    else if(sl.first_mb_in_slice == 0)
-    {
-      // 仅 reference 帧（nal_ref_idc != 0）进入 DPB
-      if(p->m_nalHeader.nal_ref_idc != 0)
-      {
-        int maxRefs = sps ? (int)sps->sps.max_num_ref_frames : 16;
-        if((int)m_dpb.size() >= maxRefs && maxRefs > 0)
-        {
-          std::size_t minIdx = m_dpb.size();
-          for(std::size_t i = 0; i < m_dpb.size(); i++)
-            if(m_dpb[i].longTermFrameIdx < 0)
-              if(minIdx == m_dpb.size() || m_dpb[i].picNum < m_dpb[minIdx].picNum)
-                minIdx = i;
-          if(minIdx != m_dpb.size())
-            m_dpb.erase(m_dpb.begin() + minIdx);
-        }
-        RefPic cur;
-        cur.picNum = frameNumWrap;
-        cur.poc = poc;
-        cur.longTermFrameIdx = -1;
-        m_dpb.push_back(cur);
-      }
-      m_prevFrameNum = frameNum;
-    }
   }
 
   void AvcWebParser::onNALUnit(std::shared_ptr<AVC::NALUnit> pNALUnit, const AVC::Parser::Info *pInfo)
@@ -418,13 +291,6 @@ namespace web
       out += ",\"sliceQp\":" + std::to_string(m_nalus[i].sliceQp);
       out += ",\"slicePoc\":" + std::to_string(m_nalus[i].slicePoc);
       out += ",\"frameNum\":" + std::to_string(m_nalus[i].frameNum);
-      out += ",\"refPocs\":[";
-      for(std::size_t k = 0; k < m_nalus[i].refPocs.size(); k++)
-      {
-        if(k) out += ",";
-        out += std::to_string(m_nalus[i].refPocs[k]);
-      }
-      out += "]";
       out += "}";
     }
     out += "]";

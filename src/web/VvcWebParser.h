@@ -40,7 +40,6 @@ namespace web
         int                         sliceQp;
         int                         slicePoc;
         int                         frameNum;
-        std::vector<int>            refPocs;
         std::shared_ptr<VVC::NALUnit> nal;
       };
 

@@ -142,7 +142,6 @@ namespace web
     m_frameNum = 0;
     m_profilePresent = false;
     m_prevSliceType = HEVC::Slice::NONE_SLICE;
-    m_spsRps.clear();
     m_pocMsb = 0;
     m_prevPicOrderCntLsb = 0;
     m_pocInitialized = false;
@@ -168,77 +167,6 @@ namespace web
     if(it != m_ppsMap.end() && it->second)
       qp += it->second -> init_qp_minus26;
     return qp;
-  }
-
-  WebParser::RpsDeltas WebParser::deriveRpsDeltas(const HEVC::ShortTermRefPicSet &rps, std::size_t stRpsIdx, const std::vector<RpsDeltas> &derived)
-  {
-    RpsDeltas out;
-
-    if(!rps.inter_ref_pic_set_prediction_flag)
-    {
-      int prev = 0;
-      for(std::size_t i = 0; i < rps.delta_poc_s0_minus1.size(); i++)
-      {
-        prev -= (int)(rps.delta_poc_s0_minus1[i] + 1);
-        out.deltaPoc.push_back(prev);
-        out.used.push_back((i < rps.used_by_curr_pic_s0_flag.size()) ? (uint8_t)rps.used_by_curr_pic_s0_flag[i] : 0);
-      }
-      prev = 0;
-      for(std::size_t i = 0; i < rps.delta_poc_s1_minus1.size(); i++)
-      {
-        prev += (int)(rps.delta_poc_s1_minus1[i] + 1);
-        out.deltaPoc.push_back(prev);
-        out.used.push_back((i < rps.used_by_curr_pic_s1_flag.size()) ? (uint8_t)rps.used_by_curr_pic_s1_flag[i] : 0);
-      }
-      return out;
-    }
-
-    std::size_t refIdx = stRpsIdx - (rps.delta_idx_minus1 + 1);
-    if(refIdx >= derived.size())
-      return out;
-    const RpsDeltas &ref = derived[refIdx];
-
-    int deltaRps = (rps.delta_rps_sign ? -1 : 1) * (int)(rps.abs_delta_rps_minus1 + 1);
-    std::size_t numDelta = ref.deltaPoc.size();
-
-    for(std::size_t i = 0; i <= numDelta; i++)
-    {
-      uint8_t used = (i < rps.used_by_curr_pic_flag.size()) ? (uint8_t)rps.used_by_curr_pic_flag[i] : 0;
-      uint8_t useDelta = used ? 1 : ((i < rps.use_delta_flag.size()) ? (uint8_t)rps.use_delta_flag[i] : 0);
-      if(used || useDelta)
-      {
-        int base = (i < numDelta) ? ref.deltaPoc[i] : 0;
-        out.deltaPoc.push_back(base + deltaRps);
-        out.used.push_back(used);
-      }
-    }
-
-    // 排序（increasing）+ flip 负部分（largest first，与 FFmpeg 顺序一致）
-    std::size_t n = out.deltaPoc.size();
-    for(std::size_t i = 1; i < n; i++)
-    {
-      int d = out.deltaPoc[i];
-      uint8_t u = out.used[i];
-      std::size_t k = i;
-      while(k > 0 && out.deltaPoc[k - 1] > d)
-      {
-        out.deltaPoc[k] = out.deltaPoc[k - 1];
-        out.used[k] = out.used[k - 1];
-        k--;
-      }
-      out.deltaPoc[k] = d;
-      out.used[k] = u;
-    }
-    std::size_t numNeg = 0;
-    for(std::size_t i = 0; i < n; i++)
-      if(out.deltaPoc[i] < 0) numNeg++;
-    for(std::size_t i = 0; i < numNeg / 2; i++)
-    {
-      std::swap(out.deltaPoc[i], out.deltaPoc[numNeg - 1 - i]);
-      std::swap(out.used[i], out.used[numNeg - 1 - i]);
-    }
-
-    return out;
   }
 
   void WebParser::fillPocAndRefs(NALUEntry &e, std::shared_ptr<HEVC::Slice> pSlice)
@@ -271,22 +199,6 @@ namespace web
     m_pocInitialized = true;
 
     e.slicePoc = pocFull;
-
-    RpsDeltas deltas;
-    if(pSlice -> short_term_ref_pic_set_sps_flag)
-    {
-      std::size_t idx = pSlice -> short_term_ref_pic_set_idx;
-      if(idx < m_spsRps.size())
-        deltas = m_spsRps[idx];
-    }
-    else
-    {
-      deltas = deriveRpsDeltas(pSlice -> short_term_ref_pic_set, m_spsRps.size(), m_spsRps);
-    }
-
-    for(std::size_t i = 0; i < deltas.deltaPoc.size(); i++)
-      if(deltas.used[i])
-        e.refPocs.push_back(pocFull + deltas.deltaPoc[i]);
   }
 
   void WebParser::onNALUnit(std::shared_ptr<HEVC::NALUnit> pNALUnit, const HEVC::Parser::Info *pInfo)
@@ -334,10 +246,6 @@ namespace web
         m_profilePresent = true;
         m_lastSPS = pSPS;
         m_spsMap[pSPS -> sps_seq_parameter_set_id] = pSPS;
-        m_spsRps.clear();
-        m_spsRps.reserve(pSPS -> short_term_ref_pic_set.size());
-        for(std::size_t i = 0; i < pSPS -> short_term_ref_pic_set.size(); i++)
-          m_spsRps.push_back(deriveRpsDeltas(pSPS -> short_term_ref_pic_set[i], i, m_spsRps));
         break;
       }
 
@@ -537,13 +445,6 @@ namespace web
       out += std::to_string(m_nalus[i].slicePoc);
       out += ",\"frameNum\":";
       out += std::to_string(m_nalus[i].frameNum);
-      out += ",\"refPocs\":[";
-      for(std::size_t k = 0; k < m_nalus[i].refPocs.size(); k++)
-      {
-        if(k) out += ",";
-        out += std::to_string(m_nalus[i].refPocs[k]);
-      }
-      out += "]";
       out += "}";
     }
     out += "]";

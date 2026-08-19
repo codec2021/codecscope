@@ -109,17 +109,6 @@ namespace web
     m_pocInitialized = true;
 
     e.slicePoc = pocFull;
-
-    for(int i = 0; i < 2; i++)
-    {
-      for(std::size_t k = 0; k < sl.sh_ref_poc_delta[i].size(); k++)
-      {
-        int32_t delta = sl.sh_ref_poc_delta[i][k];
-        if(delta == INT32_MIN)
-          continue;
-        e.refPocs.push_back(pocFull + delta);
-      }
-    }
   }
 
   void VvcWebParser::onNALUnit(std::shared_ptr<VVC::NALUnit> pNALUnit, const VVC::Parser::Info *pInfo)
@@ -305,13 +294,6 @@ namespace web
       out += ",\"sliceQp\":" + std::to_string(m_nalus[i].sliceQp);
       out += ",\"slicePoc\":" + std::to_string(m_nalus[i].slicePoc);
       out += ",\"frameNum\":" + std::to_string(m_nalus[i].frameNum);
-      out += ",\"refPocs\":[";
-      for(std::size_t k = 0; k < m_nalus[i].refPocs.size(); k++)
-      {
-        if(k) out += ",";
-        out += std::to_string(m_nalus[i].refPocs[k]);
-      }
-      out += "]";
       out += "}";
     }
     out += "]";

@@ -424,7 +424,7 @@
     hexView.innerHTML = out;
   }
 
-  // 帧时间轴（Slice 可视化，标记帧号 / POC + 参考帧箭头）
+  // 帧时间轴（Slice 可视化，标记帧号 / POC）
   function renderTimeline() {
     var slices = [];
     currentData.nalus.forEach(function (n, i) {
@@ -705,11 +705,12 @@
     var c = previewCanvas;
     var w = frame.displayWidth, h = frame.displayHeight;
     if (w <= 0 || h <= 0) { w = frame.codedWidth; h = frame.codedHeight; }
-    var maxW = previewView.clientWidth - 40;
-    if (maxW < 320) maxW = 320;
-    var scale = Math.min(1, maxW / w);
-    c.width = Math.round(w * scale);
-    c.height = Math.round(h * scale);
+    var maxW = previewView.clientWidth - 32;
+    var maxH = 480;
+    if (maxW < 160) maxW = 160;
+    var scale = Math.min(1, maxW / w, maxH / h);
+    c.width = Math.max(1, Math.round(w * scale));
+    c.height = Math.max(1, Math.round(h * scale));
     var ctx = c.getContext("2d");
     ctx.drawImage(frame, 0, 0, c.width, c.height);
   }
