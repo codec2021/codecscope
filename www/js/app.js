@@ -427,24 +427,20 @@
   // 帧时间轴（Slice 可视化，标记帧号 / POC + 参考帧箭头）
   function renderTimeline() {
     var slices = [];
-    var pocMap = {};
     currentData.nalus.forEach(function (n, i) {
       if (n.sliceType >= 0) {
-        var idx = slices.length;
-        slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum, refs: n.refPocs || [] });
-        if (n.slicePoc >= 0) pocMap[n.slicePoc] = idx;
+        slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum });
       }
     });
     if (slices.length === 0) return;
 
     var dpr = window.devicePixelRatio || 1;
-    var minBarW = 22 * timelineZoom;   // 每帧最小宽度（可缩放）
-    var labelH = 26;       // 顶部帧号/POC 标记区
-    var barH = 42;         // 色块区
-    var arrowH = 132;      // 参考帧箭头区（色块下方）
+    var minBarW = 20 * timelineZoom;   // 每帧最小宽度（可缩放）
+    var labelH = 24;       // 顶部帧号/POC 标记区
+    var barH = 36;         // 色块区
     var wrapW = timeline.parentNode.clientWidth - 24;
     var w = Math.max(wrapW, slices.length * minBarW);
-    var h = labelH + barH + arrowH;
+    var h = labelH + barH;
     timeline.style.width = w + "px";
     timeline.style.height = h + "px";
     timeline.width = w * dpr;
@@ -456,59 +452,9 @@
     var barW = w / slices.length;
     var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
     var barTop = labelH;
-    var barBottom = labelH + barH;
-
-    // 正交连线：from 色块底部先往下 → 水平 → 向上到 to 色块底部
-    function drawArrow(xFrom, xTo, color, depth) {
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(xFrom, barBottom);
-      ctx.lineTo(xFrom, barBottom + depth);
-      ctx.lineTo(xTo, barBottom + depth);
-      ctx.lineTo(xTo, barBottom);
-      ctx.stroke();
-      // 箭头尖指向 xTo（色块底部）
-      var hs = 5;
-      ctx.beginPath();
-      ctx.moveTo(xTo, barBottom);
-      ctx.lineTo(xTo - hs * 0.9, barBottom - hs);
-      ctx.lineTo(xTo + hs * 0.9, barBottom - hs);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    // 只画选中帧的参考关系（出：它参考谁；入：谁参考它）
-    if (selectedSlice >= 0 && selectedSlice < slices.length) {
-      var s = slices[selectedSlice];
-      var xs = selectedSlice * barW + barW / 2;
-      // 出箭头：参考帧 → 选中帧（过去蓝 / 未来橙）
-      var dOut = 8;
-      for (var r = 0; r < s.refs.length; r++) {
-        var j = pocMap[s.refs[r]];
-        if (j === undefined || j === selectedSlice) continue;
-        var x2 = j * barW + barW / 2;
-        var toFuture = (s.refs[r] > s.poc);
-        drawArrow(x2, xs, toFuture ? "rgba(255,140,40,0.9)" : "rgba(80,160,255,0.9)", dOut);
-        dOut += 7;
-      }
-      // 入箭头：选中帧 → 参考它的帧（绿色）
-      var dIn = 60;
-      var shown = 0;
-      for (var j2 = 0; j2 < slices.length && shown < 10; j2++) {
-        if (j2 === selectedSlice) continue;
-        if (slices[j2].refs.indexOf(s.poc) >= 0) {
-          var xj = j2 * barW + barW / 2;
-          drawArrow(xs, xj, "rgba(0,200,120,0.7)", dIn);
-          dIn += 7;
-          shown++;
-        }
-      }
-    }
 
     // 色块 + 帧号 / POC 标记
-    var step = Math.max(1, Math.ceil(46 / barW)); // 每 ~46px 至少一个标记，避免重叠
+    var step = Math.max(1, Math.ceil(44 / barW)); // 每 ~44px 至少一个标记，避免重叠
     ctx.font = "9px monospace";
     ctx.textBaseline = "middle";
     for (var i = 0; i < slices.length; i++) {
@@ -518,9 +464,9 @@
       ctx.fillRect(x, barTop, Math.max(1, barW - 0.5), barH);
       if (i % step === 0) {
         ctx.fillStyle = "#bbb";
-        ctx.fillText(String(s.frame), x + 1, 7);         // 帧号
+        ctx.fillText(String(s.frame), x + 1, 8);         // 帧号
         ctx.fillStyle = "#777";
-        ctx.fillText(String(s.poc), x + 1, labelH - 7);  // POC
+        ctx.fillText(String(s.poc), x + 1, labelH - 6);  // POC
       }
     }
     // 高亮选中帧
@@ -537,11 +483,7 @@
     var legend = document.getElementById("timelineLegend");
     legend.innerHTML =
       '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b>' +
-      ' <span style="color:#50a0ff">◂</span><span style="color:var(--text-dim)">参考过去</span>' +
-      ' <span style="color:#ff8c28">▸</span><span style="color:var(--text-dim)">参考未来</span>' +
-      ' <span style="color:#00c878">▸</span><span style="color:var(--text-dim)">被参考</span>' +
-      ' <span style="color:var(--text-dim)">｜点击帧查看其参考关系</span>' +
-      ' <span style="color:var(--text-dim)">｜缩放</span>' +
+      ' <span style="color:var(--text-dim)">｜上方帧号 / POC｜点击帧预览画面｜缩放</span>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>';
   }
@@ -567,8 +509,7 @@
     if (idx < 0 || idx >= timeline._slices.length) { timelineTip().style.display = "none"; return; }
     var s = timeline._slices[idx];
     var t = { 2: "I", 0: "P", 1: "B" }[s.type] || "?";
-    var refStr = (s.refs && s.refs.length) ? "\n参考 POC " + s.refs.join(",") : "";
-    timelineTip().textContent = "帧 " + s.frame + "  [" + t + "]\nPOC " + s.poc + refStr;
+    timelineTip().textContent = "帧 " + s.frame + "  [" + t + "]\nPOC " + s.poc;
     timelineTip().style.display = "block";
     timelineTip().style.left = (e.clientX + 12) + "px";
     timelineTip().style.top = (e.clientY + 12) + "px";
@@ -764,7 +705,9 @@
     var c = previewCanvas;
     var w = frame.displayWidth, h = frame.displayHeight;
     if (w <= 0 || h <= 0) { w = frame.codedWidth; h = frame.codedHeight; }
-    var scale = Math.min(1, 480 / w);
+    var maxW = previewView.clientWidth - 40;
+    if (maxW < 320) maxW = 320;
+    var scale = Math.min(1, maxW / w);
     c.width = Math.round(w * scale);
     c.height = Math.round(h * scale);
     var ctx = c.getContext("2d");

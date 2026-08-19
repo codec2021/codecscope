@@ -76,12 +76,12 @@ body { display: flex; flex-direction: column; }
 .timeline-wrap { padding: 6px 12px 10px; overflow-x: auto; }
 .timeline { display: block; cursor: crosshair; }
 .timeline-tip { position: fixed; pointer-events: none; background: rgba(0,0,0,.85); color: #eee; font: 11px monospace; padding: 3px 6px; border-radius: 3px; z-index: 9999; white-space: pre; }
-.preview-view { padding: 8px 0; }
-.preview-wrap { padding: 8px 12px 12px; display: flex; align-items: flex-start; gap: 12px; }
-.preview-canvas { background: #000; border: 1px solid var(--border); border-radius: 4px; max-width: 480px; }
-.preview-side { display: flex; flex-direction: column; gap: 4px; }
+.preview-view { padding: 4px 0; }
+.preview-wrap { padding: 12px 16px 16px; display: flex; align-items: flex-start; gap: 16px; justify-content: center; }
+.preview-canvas { background: #000; border: 1px solid var(--border); border-radius: 6px; max-width: 100%; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.preview-side { display: flex; flex-direction: column; gap: 8px; min-width: 140px; padding-top: 4px; }
 .preview-controls { display: flex; align-items: center; gap: 8px; }
-.btn-small { padding: 4px 12px; font-size: 12px; }
+.btn-small { padding: 5px 14px; font-size: 13px; }
 .preview-msg { color: var(--text-dim); font-size: 12px; }
 .legend { font-weight: 400; font-size: 12px; color: var(--text-dim); margin-left: 8px; }
 .legend b { font-weight: 600; }
