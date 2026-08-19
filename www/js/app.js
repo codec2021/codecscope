@@ -864,8 +864,10 @@
 
   function stepFrame(delta) {
     if (play.active) stopPlayback();
-    var si = selectedSlice + delta;
-    if (si < 0 || si >= timeline._slices.length) return;
+    var max = timeline._slices.length - 1;
+    var si = selectedSlice < 0 ? 0 : selectedSlice + delta;
+    si = Math.max(0, Math.min(si, max));
+    if (si < 0 || !timeline._slices[si]) return;
     selectedSlice = si;
     selectNal(timeline._slices[si].index, true);
     renderTimeline();
