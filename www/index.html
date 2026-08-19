@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>H26xBrowser - H.264/H.265/H.266 码流分析</title>
+  <title>H26xBrowser - H.264/H.265/H.266 Bitstream Analyzer</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,30 +11,30 @@
     <h1>H26x<span class="accent">Browser</span></h1>
     <div class="header-actions">
       <span id="codecBadge" class="codec-badge hidden"></span>
-      <button id="openBtn" class="btn">打开文件</button>
-      <button id="resetBtn" class="btn btn-secondary hidden">重置</button>
+      <button id="openBtn" class="btn">Open File</button>
+      <button id="resetBtn" class="btn btn-secondary hidden">Reset</button>
       <input type="file" id="fileInput" hidden accept=".h264,.h265,.hevc,.h266,.vvc,.266,.265,.264,.avc,.bin,.bit,.mp4,.m4v,.mov">
-      <span id="fileName" class="file-name">未加载文件</span>
+      <span id="fileName" class="file-name">No file loaded</span>
     </div>
   </header>
 
   <div id="dropzone" class="dropzone">
     <div class="dropzone-inner">
-      <p>将 <strong>.h264 / .h265 / .h266 / .mp4</strong> 码流文件拖放到此处</p>
-      <p class="hint">支持 H.264(AVC) / H.265(HEVC) / H.266(VVC) 裸流，以及 MP4/MOV 封装（自动解封装）。</p>
+      <p>Drop a <strong>.h264 / .h265 / .h266 / .mp4</strong> bitstream here</p>
+      <p class="hint">Supports H.264 (AVC) / H.265 (HEVC) / H.266 (VVC) elementary streams and MP4/MOV containers (auto demux).</p>
     </div>
   </div>
 
   <section id="statsBar" class="stats-bar hidden"></section>
 
   <section id="timelinePanel" class="timeline-panel hidden">
-    <div class="panel-title">帧结构 (Slice 类型时间轴) <span id="timelineLegend" class="legend"></span></div>
+    <div class="panel-title">Frame Structure (Slice Timeline) <span id="timelineLegend" class="legend"></span></div>
     <div class="timeline-wrap"><canvas id="timeline" class="timeline"></canvas></div>
   </section>
 
   <main id="mainArea" class="main-area hidden">
     <section class="panel nal-panel">
-      <div class="panel-title">NAL 单元列表 <span id="nalCount" class="count"></span></div>
+      <div class="panel-title">NAL Unit List <span id="nalCount" class="count"></span></div>
       <div id="nalScroll" class="nal-scroll">
         <div id="nalSpacer"></div>
         <div id="nalRows"></div>
@@ -42,18 +42,18 @@
       <div id="nalHeaderRow" class="nal-header">
         <span class="c-offset">Offset</span>
         <span class="c-length">Length</span>
-        <span class="c-type">类型</span>
-        <span class="c-info">信息</span>
+        <span class="c-type">Type</span>
+        <span class="c-info">Info</span>
       </div>
     </section>
 
     <section class="panel syntax-panel">
       <div class="panel-title">
-        语法元素 <span id="syntaxTitle" class="count"></span>
+        Syntax Elements <span id="syntaxTitle" class="count"></span>
         <div class="tab-group">
-          <button id="tabSyntax" class="tab active">语法树</button>
-          <button id="tabPreview" class="tab">画面</button>
-          <button id="tabHex" class="tab">Hex 视图</button>
+          <button id="tabSyntax" class="tab active">Syntax</button>
+          <button id="tabPreview" class="tab">Preview</button>
+          <button id="tabHex" class="tab">Hex</button>
         </div>
       </div>
       <div id="syntaxTree" class="syntax-tree"></div>
@@ -62,10 +62,12 @@
           <canvas id="previewCanvas" class="preview-canvas"></canvas>
           <div class="preview-side">
             <div class="preview-controls">
-              <button id="previewPlayBtn" class="btn btn-small">▶ 播放</button>
-              <span id="previewHint" class="legend"></span>
+              <button id="previewPlayBtn" class="btn btn-small">▶ Play</button>
+              <button id="previewPrevBtn" class="btn btn-small btn-secondary" title="Prev frame">⏮</button>
+              <button id="previewNextBtn" class="btn btn-small btn-secondary" title="Next frame">⏭</button>
             </div>
-            <div id="previewMsg" class="preview-msg">点击时间轴上的帧查看画面</div>
+            <div id="previewHint" class="legend"></div>
+            <div id="previewMsg" class="preview-msg">Click a frame on the timeline to preview</div>
           </div>
         </div>
       </div>
@@ -75,23 +77,23 @@
 
   <section id="bottomPanels" class="bottom-panels hidden">
     <section class="panel hdr-panel">
-      <div class="panel-title">HDR / 色彩信息</div>
+      <div class="panel-title">HDR / Color Info</div>
       <div id="hdrInfo" class="kv-list"></div>
     </section>
 
     <section class="panel warning-panel">
       <div class="panel-title">
-        警告 <span id="warningCount" class="count"></span>
+        Warnings <span id="warningCount" class="count"></span>
         <select id="warningFilter" class="filter">
-          <option value="-1">全部</option>
-          <option value="1">数值越界</option>
-          <option value="2">引用结构不存在</option>
-          <option value="3">Profile 一致性</option>
+          <option value="-1">All</option>
+          <option value="1">Out of range</option>
+          <option value="2">Missing ref structure</option>
+          <option value="3">Profile conformance</option>
         </select>
       </div>
       <div class="table-wrap">
         <table id="warningTable">
-          <thead><tr><th>Offset</th><th>消息</th></tr></thead>
+          <thead><tr><th>Offset</th><th>Message</th></tr></thead>
           <tbody id="warningBody"></tbody>
         </table>
       </div>
@@ -99,7 +101,7 @@
   </section>
 
   <footer class="statusbar">
-    <span id="status">正在加载解析模块…</span>
+    <span id="status">Loading parser module...</span>
   </footer>
 
   <script src="hevc.js"></script>

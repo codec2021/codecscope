@@ -550,6 +550,15 @@ namespace web
     else
       out += ",\"hasMdi\":false";
 
+    int picW = 0, picH = 0;
+    if(m_lastSPS)
+    {
+      picW = (int)m_lastSPS -> pic_width_in_luma_samples;
+      picH = (int)m_lastSPS -> pic_height_in_luma_samples;
+    }
+    out += ",\"picWidth\":" + std::to_string(picW);
+    out += ",\"picHeight\":" + std::to_string(picH);
+
     out += "}";
 
     // warnings

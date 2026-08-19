@@ -37,6 +37,8 @@
   var previewMsg = document.getElementById("previewMsg");
   var previewHint = document.getElementById("previewHint");
   var previewPlayBtn = document.getElementById("previewPlayBtn");
+  var previewPrevBtn = document.getElementById("previewPrevBtn");
+  var previewNextBtn = document.getElementById("previewNextBtn");
 
   var ROW_HEIGHT = 22;
   var timelineZoom = 1;   // 时间轴缩放倍数
@@ -295,7 +297,7 @@
     stat("I", si.i + (si.iPct !== undefined ? " (" + si.iPct + "%)" : ""));
     stat("P", si.p + (si.pPct !== undefined ? " (" + si.pPct + "%)" : ""));
     stat("B", si.b + (si.bPct !== undefined ? " (" + si.bPct + "%)" : ""));
-    if (si.picWidth) stat("分辨率", si.picWidth + " x " + si.picHeight);
+    if (si.picWidth) stat("Resolution", si.picWidth + " x " + si.picHeight);
     stat("Profile", si.profile);
     stat("Level", si.level);
     if (si.tier) stat("Tier", si.tier);
@@ -403,7 +405,7 @@
   // Hex 视图
   function renderHex(index) {
     var nal = currentData.nalus[index];
-    if (!fileBytes || nal.length <= 0) { hexView.textContent = "无数据"; return; }
+    if (!fileBytes || nal.length <= 0) { hexView.textContent = "No data"; return; }
     var end = Math.min(nal.offset + nal.length, fileBytes.length);
     var out = "";
     for (var i = nal.offset; i < end; i += 16) {
@@ -483,7 +485,7 @@
     var legend = document.getElementById("timelineLegend");
     legend.innerHTML =
       '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b>' +
-      ' <span style="color:var(--text-dim)">｜上方帧号 / POC｜点击帧预览画面｜缩放</span>' +
+      ' <span style="color:var(--text-dim)"> | Frame# / POC | Click a frame to preview | Zoom</span>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>';
   }
@@ -509,7 +511,7 @@
     if (idx < 0 || idx >= timeline._slices.length) { timelineTip().style.display = "none"; return; }
     var s = timeline._slices[idx];
     var t = { 2: "I", 0: "P", 1: "B" }[s.type] || "?";
-    timelineTip().textContent = "帧 " + s.frame + "  [" + t + "]\nPOC " + s.poc;
+    timelineTip().textContent = "Frame " + s.frame + "  [" + t + "]\nPOC " + s.poc;
     timelineTip().style.display = "block";
     timelineTip().style.left = (e.clientX + 12) + "px";
     timelineTip().style.top = (e.clientY + 12) + "px";
@@ -581,10 +583,10 @@
 
   function initPlayDecoder(done) {
     var cs = codecString();
-    if (!cs) { previewMsg.textContent = "无法确定 codec 字符串"; return; }
+    if (!cs) { previewMsg.textContent = "Unable to determine codec string"; return; }
     VideoDecoder.isConfigSupported({ codec: cs }).then(function (support) {
       if (!support.supported) {
-        previewMsg.textContent = "当前浏览器不支持解码 " + cs + "（" + (currentCodec === "hevc" ? "H.265 可能受硬件/许可限制" : "H.264") + "）";
+        previewMsg.textContent = "Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : "");
         return;
       }
       if (play.decoder) { try { play.decoder.close(); } catch (e) {} }
@@ -598,14 +600,14 @@
       play.decoder = new VideoDecoder({
         output: function (frame) { play.frames[frame.timestamp] = frame; },
         error: function (err) {
-          previewMsg.textContent = "解码失败：" + err.message;
+          previewMsg.textContent = "Decode error: " + err.message;
           stopPlayback();
         }
       });
       play.decoder.configure({ codec: cs, optimizeForLatency: true });
       done();
     }).catch(function (err) {
-      previewMsg.textContent = "配置失败：" + err.message;
+      previewMsg.textContent = "Config error: " + err.message;
     });
   }
 
@@ -613,7 +615,7 @@
     var frame = play.frames[sliceIdx];
     if (frame) {
       drawVideoFrame(frame);
-      previewHint.textContent = "帧 " + timeline._slices[sliceIdx].frame + " / POC " + timeline._slices[sliceIdx].poc;
+      previewHint.textContent = "Frame " + timeline._slices[sliceIdx].frame + " / POC " + timeline._slices[sliceIdx].poc;
     }
     for (var k in play.frames) {
       if (parseInt(k, 10) < sliceIdx - 2) { try { play.frames[k].close(); } catch (e) {} delete play.frames[k]; }
@@ -623,7 +625,7 @@
   function stopPlayback() {
     if (play.timer) { clearInterval(play.timer); play.timer = null; }
     play.active = false;
-    previewPlayBtn.textContent = "▶ 播放";
+    previewPlayBtn.textContent = "▶ Play";
   }
 
   function startPlayback() {
@@ -631,11 +633,11 @@
     var si = selectedSlice;
     if (si < 0 || si >= timeline._slices.length) return;
     var keySlice = findKeySlice(si);
-    if (keySlice < 0) { previewMsg.textContent = "未找到关键帧"; return; }
+    if (keySlice < 0) { previewMsg.textContent = "Key frame not found"; return; }
     initPlayDecoder(function () {
       play.active = true;
       play.curSlice = si;
-      previewPlayBtn.textContent = "⏸ 暂停";
+      previewPlayBtn.textContent = "⏸ Pause";
       previewMsg.textContent = "";
       feedSlices(si);
       play.timer = setInterval(function () {
@@ -715,24 +717,33 @@
     ctx.drawImage(frame, 0, 0, c.width, c.height);
   }
 
+  function presetPreviewCanvas() {
+    var hdr = currentData && currentData.hdr;
+    var w = hdr && hdr.picWidth, h = hdr && hdr.picHeight;
+    if (!w || !h) return;
+    var maxW = previewView.clientWidth - 32;
+    var maxH = 480;
+    if (maxW < 160) maxW = 160;
+    var scale = Math.min(1, maxW / w, maxH / h);
+    previewCanvas.width = Math.max(1, Math.round(w * scale));
+    previewCanvas.height = Math.max(1, Math.round(h * scale));
+  }
+
   function previewFrame(sliceIndex) {
     if (!fileBytes || !currentData || !timeline._slices) return;
     if (currentCodec === "vvc") {
-      showTab("preview");
-      previewMsg.textContent = "H.266 (VVC) 暂无法在浏览器中解码";
+      previewMsg.textContent = "H.266 (VVC) cannot be decoded in browser";
       return;
     }
     if (!("VideoDecoder" in window)) {
-      showTab("preview");
-      previewMsg.textContent = "当前浏览器不支持 WebCodecs";
+      previewMsg.textContent = "Browser does not support WebCodecs";
       return;
     }
     if (play.active) stopPlayback();
     var keySlice = findKeySlice(sliceIndex);
-    if (keySlice < 0) { previewMsg.textContent = "未找到关键帧"; return; }
+    if (keySlice < 0) { previewMsg.textContent = "Key frame not found"; return; }
 
-    showTab("preview");
-    previewHint.textContent = "解码中…（POC " + timeline._slices[sliceIndex].poc + "）";
+    previewHint.textContent = "Decoding... (POC " + timeline._slices[sliceIndex].poc + ")";
     previewMsg.textContent = "";
 
     initPlayDecoder(function () {
@@ -836,11 +847,23 @@
   tabHex.addEventListener("click", function () { showTab("hex"); });
 
   previewPlayBtn.addEventListener("click", function () { startPlayback(); });
+  previewPrevBtn.addEventListener("click", function () { stepFrame(-1); });
+  previewNextBtn.addEventListener("click", function () { stepFrame(1); });
+
+  function stepFrame(delta) {
+    if (play.active) stopPlayback();
+    var si = selectedSlice + delta;
+    if (si < 0 || si >= timeline._slices.length) return;
+    selectedSlice = si;
+    selectNal(timeline._slices[si].index, true);
+    renderTimeline();
+    previewFrame(si);
+  }
 
   // ---------- 文件处理 ----------
   function handleFile(file) {
     if (!file) return;
-    setStatus("正在解析 " + file.name + " …");
+    setStatus("Parsing " + file.name + " ...");
     fileNameEl.textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)";
 
     var reader = new FileReader();
@@ -852,11 +875,11 @@
         if (isMp4(rawBytes)) {
           var demuxed = demuxMp4(rawBytes);
           if (!demuxed || !demuxed.annexb.length) {
-            setStatus("MP4 解封装失败：未找到视频轨道");
+            setStatus("MP4 demux failed: no video track found");
             return;
           }
           fileBytes = demuxed.annexb;
-          srcNote = "（MP4 解封装）";
+          srcNote = " (MP4 demuxed)";
         } else {
           fileBytes = rawBytes;
         }
@@ -881,14 +904,15 @@
         renderWarnings();
         selectedSlice = -1;
         renderTimeline();
+        presetPreviewCanvas();
         syntaxTree.innerHTML = "";
         syntaxTitle.textContent = "";
 
         if (currentData.nalus.length > 0) selectNal(0, false);
 
-        setStatus("解析完成：" + currentCodec.toUpperCase() + " 共 " + currentData.nalus.length + " 个 NAL 单元" + srcNote + "，耗时 " + (t1 - t0).toFixed(0) + " ms");
+        setStatus("Parsed: " + currentCodec.toUpperCase() + ", " + currentData.nalus.length + " NAL units" + srcNote + ", " + (t1 - t0).toFixed(0) + " ms");
       } catch (err) {
-        setStatus("解析失败：" + err.message);
+        setStatus("Parse error: " + err.message);
         console.error(err);
       }
     };
@@ -907,7 +931,7 @@
 
     codecBadge.classList.add("hidden");
     codecBadge.textContent = "";
-    fileNameEl.textContent = "未加载文件";
+    fileNameEl.textContent = "No file loaded";
     fileInput.value = "";
 
     dropzone.classList.remove("hidden");
@@ -920,7 +944,7 @@
     play.frames = {};
     play.active = false;
     play.feedSlice = -1;
-    previewPlayBtn.textContent = "▶ 播放";
+    previewPlayBtn.textContent = "▶ Play";
     mainArea.classList.add("hidden");
     bottomPanels.classList.add("hidden");
     resetBtn.classList.add("hidden");
@@ -931,14 +955,14 @@
     syntaxTree.innerHTML = "";
     syntaxTitle.textContent = "";
     hexView.innerHTML = "";
-    previewMsg.textContent = "点击时间轴上的帧查看画面";
+    previewMsg.textContent = "Click a frame on the timeline to preview";
     previewHint.textContent = "";
     showTab("syntax");
     hdrInfo.innerHTML = "";
     warningBody.innerHTML = "";
     warningCount.textContent = "";
 
-    setStatus("解析模块已就绪（H.264/H.265/H.266），请打开或拖入码流文件");
+    setStatus("Parser ready (H.264/H.265/H.266). Open or drop a bitstream file.");
   }
 
   resetBtn.addEventListener("click", resetAll);
@@ -958,14 +982,14 @@
   // ---------- 启动 ----------
   function boot() {
     if (typeof createHevcModule !== "function") {
-      setStatus("错误：未找到 WASM 模块 (hevc.js)");
+      setStatus("Error: WASM module (hevc.js) not found");
       return;
     }
     createHevcModule().then(function (m) {
       Module = m;
-      setStatus("解析模块已就绪（H.264/H.265/H.266），请打开或拖入码流文件");
+      setStatus("Parser ready (H.264/H.265/H.266). Open or drop a bitstream file.");
     }).catch(function (err) {
-      setStatus("加载 WASM 模块失败：" + err);
+      setStatus("Failed to load WASM module: " + err);
       console.error(err);
     });
   }
