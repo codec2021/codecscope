@@ -36,6 +36,7 @@
   var previewCanvas = document.getElementById("previewCanvas");
   var previewMsg = document.getElementById("previewMsg");
   var previewHint = document.getElementById("previewHint");
+  var previewPlayBtn = document.getElementById("previewPlayBtn");
 
   var ROW_HEIGHT = 22;
   var timelineZoom = 1;   // 时间轴缩放倍数
@@ -43,6 +44,211 @@
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function hex8(v) { var s = v.toString(16); while (s.length < 8) s = "0" + s; return "0x" + s; }
+
+  // ---------- MP4 解封装 ----------
+  function readU32(d, o) { return (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]; }
+  function readU16(d, o) { return (d[o] << 8) | d[o + 1]; }
+  function fourCC(d, o) { return String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]); }
+  function isMp4(d) { return d.length >= 12 && fourCC(d, 4) === "ftyp"; }
+
+  function findBox(d, start, end, type) {
+    var i = start;
+    while (i + 8 <= end) {
+      var size = readU32(d, i);
+      if (size < 8 || i + size > end) break;
+      if (fourCC(d, i + 4) === type) return { offset: i, size: size };
+      i += size;
+    }
+    return null;
+  }
+
+  function findFourCC(d, start, end, cc) {
+    for (var i = start; i + 4 <= end; i++) {
+      if (fourCC(d, i) === cc) return { offset: i - 4, size: readU32(d, i - 4) };
+    }
+    return null;
+  }
+
+  function nalToAnnexB(nals) {
+    // nals: array of Uint8Array（已是 EBSP，含 emulation prevention）
+    var out = [];
+    for (var j = 0; j < nals.length; j++) {
+      out.push(0, 0, 0, 1);
+      for (var k = 0; k < nals[j].length; k++) out.push(nals[j][k]);
+    }
+    return new Uint8Array(out);
+  }
+
+  function demuxMp4(d) {
+    var moov = null;
+    var i = 0;
+    while (i + 8 <= d.length) {
+      var size = readU32(d, i);
+      if (size < 8) break;
+      if (fourCC(d, i + 4) === "moov") { moov = { offset: i + 8, end: i + size }; break; }
+      i += size;
+    }
+    if (!moov) return null;
+
+    // 找视频轨道
+    var trakStart = moov.offset;
+    var result = null;
+    while (trakStart + 8 <= moov.end && !result) {
+      var trakSize = readU32(d, trakStart);
+      if (trakSize < 8) break;
+      if (fourCC(d, trakStart + 4) === "trak") {
+        var trakEnd = trakStart + trakSize;
+        var mdia = findBox(d, trakStart + 8, trakEnd, "mdia");
+        if (mdia) {
+          var hdlr = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "hdlr");
+          if (hdlr && fourCC(d, hdlr.offset + 16) === "vide") {
+            var minf = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "minf");
+            if (minf) {
+              var stbl = findBox(d, minf.offset + 8, minf.offset + minf.size, "stbl");
+              if (stbl) result = parseStbl(d, stbl.offset + 8, stbl.offset + stbl.size);
+            }
+          }
+        }
+      }
+      trakStart += trakSize;
+    }
+    return result;
+  }
+
+  function parseStbl(d, start, end) {
+    var stsd = findBox(d, start, end, "stsd");
+    var stsz = findBox(d, start, end, "stsz");
+    var stsc = findBox(d, start, end, "stsc");
+    var stco = findBox(d, start, end, "stco") || findBox(d, start, end, "co64");
+
+    if (!stsd || !stsz || !stco) return null;
+
+    // 从 stsd 提取 codec + SPS/PPS
+    var codec = null;
+    var paramNals = []; // 参数集 NAL（RBSP，含 VPS/SPS/PPS）
+    var sdEnd = stsd.offset + stsd.size;
+    var p = stsd.offset + 16; // 跳过 version+flags(4) + entry_count(4)，到第一个 sample entry
+    if (p + 8 <= sdEnd) {
+      var fmt = fourCC(d, p + 4);
+      if (fmt === "avc1" || fmt === "avc3") codec = "avc";
+      if (fmt === "hev1" || fmt === "hvc1") codec = "hevc";
+      if (fmt === "vvc1" || fmt === "vvi1") codec = "vvc";
+      // 在 stsd 里搜 avcC/hvcC/vvcC box（fourcc 字节搜索）
+      var cfg = findFourCC(d, stsd.offset + 8, sdEnd, "avcC") || findFourCC(d, stsd.offset + 8, sdEnd, "hvcC") || findFourCC(d, stsd.offset + 8, sdEnd, "vvcC");
+      if (cfg) {
+        var c = cfg.offset + 8; // 配置内容
+        var cEnd = cfg.offset + cfg.size;
+        if (codec === "avc") {
+          // avcC: version(1)+profile(1)+compat(1)+level(1)+0xFF+0xE1+spslen(2)+sps+numPPS(1)+ppslen(2)+pps
+          var spsLen = readU16(d, c + 6);
+          paramNals.push(d.subarray(c + 8, c + 8 + spsLen));
+          var np = c + 8 + spsLen;
+          var numPps = d[np];
+          np += 1;
+          for (var q = 0; q < numPps; q++) {
+            var ppsLen = readU16(d, np);
+            paramNals.push(d.subarray(np + 2, np + 2 + ppsLen));
+            np += 2 + ppsLen;
+          }
+        } else if (codec === "hevc" || codec === "vvc") {
+          // hvcC/vvcC: 23-byte header（numOfArrays 在 offset 22），然后 arrays
+          var na = d[c + 22];
+          var np2 = c + 23;
+          for (var q2 = 0; q2 < na; q2++) {
+            var ntype = d[np2] & 0x3F;
+            var numNalus = readU16(d, np2 + 1);
+            np2 += 3;
+            for (var q3 = 0; q3 < numNalus; q3++) {
+              var nlen = readU16(d, np2);
+              // 只保留 VPS/SPS/PPS（32/33/34），跳过 SEI(39) 等
+              if (ntype === 32 || ntype === 33 || ntype === 34)
+                paramNals.push(d.subarray(np2 + 2, np2 + 2 + nlen));
+              np2 += 2 + nlen;
+            }
+          }
+        }
+      }
+    }
+    if (!codec) return null;
+
+    // stsz：样本大小
+    var sampleSizes = [];
+    var uniformSize = readU32(d, stsz.offset + 12);   // sample_size
+    var szCount = readU32(d, stsz.offset + 16);        // sample_count
+    if (uniformSize > 0) {
+      for (var s1 = 0; s1 < szCount; s1++) sampleSizes.push(uniformSize);
+    } else {
+      for (var s2 = 0; s2 < szCount; s2++) sampleSizes.push(readU32(d, stsz.offset + 20 + s2 * 4));
+    }
+
+    // stco：chunk offset
+    var chunkOffsets = [];
+    var coCount = readU32(d, stco.offset + 12);         // entry_count
+    var co64 = fourCC(d, stco.offset + 4) === "co64";
+    for (var c1 = 0; c1 < coCount; c1++) {
+      if (co64) {
+        var hi = readU32(d, stco.offset + 16 + c1 * 8);
+        var lo = readU32(d, stco.offset + 20 + c1 * 8);
+        chunkOffsets.push(hi * 4294967296 + lo);
+      } else {
+        chunkOffsets.push(readU32(d, stco.offset + 16 + c1 * 4));
+      }
+    }
+
+    // stsc：sample to chunk
+    var stscEntries = [];
+    if (stsc) {
+      var scCount = readU32(d, stsc.offset + 12);       // entry_count
+      for (var sc = 0; sc < scCount; sc++) {
+        stscEntries.push({
+          firstChunk: readU32(d, stsc.offset + 16 + sc * 12),
+          samplesPerChunk: readU32(d, stsc.offset + 20 + sc * 12)
+        });
+      }
+    } else {
+      stscEntries.push({ firstChunk: 1, samplesPerChunk: 1 });
+    }
+
+    // 构建 chunk → 样本数 映射
+    var sampleOffsets = [];
+    var chunkSampleCount = [];
+    var sampleIndex = 0;
+    var chunkIndex = 0;
+    var dataOffset = 0;
+    while (sampleIndex < sampleSizes.length && chunkIndex < chunkOffsets.length) {
+      // 当前 chunk 的 samplesPerChunk
+      var spc = 1;
+      for (var e = 0; e < stscEntries.length; e++) {
+        if (stscEntries[e].firstChunk <= chunkIndex + 1) spc = stscEntries[e].samplesPerChunk;
+      }
+      for (var k = 0; k < spc && sampleIndex < sampleSizes.length; k++) {
+        sampleOffsets.push(chunkOffsets[chunkIndex] + dataOffset);
+        dataOffset += sampleSizes[sampleIndex];
+        sampleIndex++;
+      }
+      chunkIndex++;
+      dataOffset = 0;
+    }
+
+    // 组装 Annex B 裸流（用数组收集，避免 addEP 膨胀导致越界）
+    var annexbArr = [];
+    var paramAnnexb = nalToAnnexB(paramNals);
+    for (var pi = 0; pi < paramAnnexb.length; pi++) annexbArr.push(paramAnnexb[pi]);
+    for (var si2 = 0; si2 < sampleOffsets.length; si2++) {
+      var sample = d.subarray(sampleOffsets[si2], sampleOffsets[si2] + sampleSizes[si2]);
+      var p2 = 0;
+      while (p2 + 4 <= sample.length) {
+        var nlen = (sample[p2] << 24) | (sample[p2 + 1] << 16) | (sample[p2 + 2] << 8) | sample[p2 + 3];
+        p2 += 4;
+        if (p2 + nlen > sample.length) break;
+        var nal = sample.subarray(p2, p2 + nlen);
+        annexbArr.push(0, 0, 0, 1);
+        for (var k2 = 0; k2 < nal.length; k2++) annexbArr.push(nal[k2]);
+        p2 += nlen;
+      }
+    }
+    return { codec: codec, annexb: new Uint8Array(annexbArr) };
+  }
 
   // ---------- WASM 封装 ----------
   function parseBuffer(bytes) {
@@ -234,11 +440,11 @@
     var dpr = window.devicePixelRatio || 1;
     var minBarW = 22 * timelineZoom;   // 每帧最小宽度（可缩放）
     var labelH = 26;       // 顶部帧号/POC 标记区
-    var arrowH = 70;       // 参考帧箭头区
     var barH = 42;         // 色块区
+    var arrowH = 132;      // 参考帧箭头区（色块下方）
     var wrapW = timeline.parentNode.clientWidth - 24;
     var w = Math.max(wrapW, slices.length * minBarW);
-    var h = labelH + arrowH + barH;
+    var h = labelH + barH + arrowH;
     timeline.style.width = w + "px";
     timeline.style.height = h + "px";
     timeline.width = w * dpr;
@@ -249,26 +455,26 @@
 
     var barW = w / slices.length;
     var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
-    var barTop = labelH + arrowH;
+    var barTop = labelH;
+    var barBottom = labelH + barH;
 
-    function drawArrow(xFrom, xTo, color) {
-      var dist = Math.abs(xTo - xFrom);
-      var arc = Math.max(12, Math.min(58, dist * 0.2));
-      var mid = (xFrom + xTo) / 2;
+    // 正交连线：from 色块底部先往下 → 水平 → 向上到 to 色块底部
+    function drawArrow(xFrom, xTo, color, depth) {
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.moveTo(xFrom, barTop);
-      ctx.quadraticCurveTo(mid, barTop - arc, xTo, barTop);
+      ctx.moveTo(xFrom, barBottom);
+      ctx.lineTo(xFrom, barBottom + depth);
+      ctx.lineTo(xTo, barBottom + depth);
+      ctx.lineTo(xTo, barBottom);
       ctx.stroke();
-      // 箭头头部（指向 xTo）
-      var dir = xTo >= xFrom ? 1 : -1;
+      // 箭头尖指向 xTo（色块底部）
       var hs = 5;
       ctx.beginPath();
-      ctx.moveTo(xTo, barTop);
-      ctx.lineTo(xTo - dir * hs, barTop - hs * 0.7);
-      ctx.lineTo(xTo - dir * hs, barTop + hs * 0.7);
+      ctx.moveTo(xTo, barBottom);
+      ctx.lineTo(xTo - hs * 0.9, barBottom - hs);
+      ctx.lineTo(xTo + hs * 0.9, barBottom - hs);
       ctx.closePath();
       ctx.fill();
     }
@@ -277,20 +483,26 @@
     if (selectedSlice >= 0 && selectedSlice < slices.length) {
       var s = slices[selectedSlice];
       var xs = selectedSlice * barW + barW / 2;
-      // 出箭头：参考帧 → 选中帧
+      // 出箭头：参考帧 → 选中帧（过去蓝 / 未来橙）
+      var dOut = 8;
       for (var r = 0; r < s.refs.length; r++) {
         var j = pocMap[s.refs[r]];
         if (j === undefined || j === selectedSlice) continue;
         var x2 = j * barW + barW / 2;
         var toFuture = (s.refs[r] > s.poc);
-        drawArrow(x2, xs, toFuture ? "rgba(255,140,40,0.9)" : "rgba(80,160,255,0.9)");
+        drawArrow(x2, xs, toFuture ? "rgba(255,140,40,0.9)" : "rgba(80,160,255,0.9)", dOut);
+        dOut += 7;
       }
-      // 入箭头：选中帧 → 参考它的帧
-      for (var j2 = 0; j2 < slices.length; j2++) {
+      // 入箭头：选中帧 → 参考它的帧（绿色）
+      var dIn = 60;
+      var shown = 0;
+      for (var j2 = 0; j2 < slices.length && shown < 10; j2++) {
         if (j2 === selectedSlice) continue;
         if (slices[j2].refs.indexOf(s.poc) >= 0) {
           var xj = j2 * barW + barW / 2;
-          drawArrow(xs, xj, "rgba(0,200,120,0.8)");
+          drawArrow(xs, xj, "rgba(0,200,120,0.7)", dIn);
+          dIn += 7;
+          shown++;
         }
       }
     }
@@ -378,7 +590,123 @@
   timeline.addEventListener("mouseleave", function () { timelineTip().style.display = "none"; });
 
   // ---------- 画面预览（WebCodecs 解码 H.264/H.265） ----------
-  var previewDecoder = null;
+  var play = {
+    active: false,
+    timer: null,
+    decoder: null,
+    params: [],
+    feedSlice: -1,
+    frames: {},
+    curSlice: -1
+  };
+
+  function findKeySlice(sliceIndex) {
+    for (var s = sliceIndex; s >= 0; s--) {
+      var nalIdx = timeline._slices[s].index;
+      if (isKeyNal(currentData.nalus[nalIdx].type)) return s;
+    }
+    return -1;
+  }
+
+  function makeAuData(nalIdxs) {
+    var len = 0;
+    for (var k = 0; k < nalIdxs.length; k++) len += currentData.nalus[nalIdxs[k]].length;
+    var data = new Uint8Array(len);
+    var o = 0;
+    for (var k2 = 0; k2 < nalIdxs.length; k2++) {
+      var nal = currentData.nalus[nalIdxs[k2]];
+      data.set(fileBytes.subarray(nal.offset, nal.offset + nal.length), o);
+      o += nal.length;
+    }
+    return data;
+  }
+
+  function feedSlices(toSlice) {
+    var slices = timeline._slices;
+    var end = Math.min(toSlice, slices.length - 1);
+    while (play.feedSlice < end && play.decoder && play.decoder.state === "configured") {
+      var si = play.feedSlice + 1;
+      var nalIdx = slices[si].index;
+      var isKey = isKeyNal(currentData.nalus[nalIdx].type);
+      var nals = isKey ? play.params.concat([nalIdx]) : [nalIdx];
+      play.decoder.decode(new EncodedVideoChunk({
+        type: isKey ? "key" : "delta",
+        timestamp: si,
+        data: makeAuData(nals)
+      }));
+      play.feedSlice = si;
+    }
+  }
+
+  function initPlayDecoder(done) {
+    var cs = codecString();
+    if (!cs) { previewMsg.textContent = "无法确定 codec 字符串"; return; }
+    VideoDecoder.isConfigSupported({ codec: cs }).then(function (support) {
+      if (!support.supported) {
+        previewMsg.textContent = "当前浏览器不支持解码 " + cs + "（" + (currentCodec === "hevc" ? "H.265 可能受硬件/许可限制" : "H.264") + "）";
+        return;
+      }
+      if (play.decoder) { try { play.decoder.close(); } catch (e) {} }
+      for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
+      play.frames = {};
+      play.feedSlice = -1;
+      play.params = [];
+      var types = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
+      for (var i = 0; i < currentData.nalus.length; i++)
+        if (types.indexOf(currentData.nalus[i].type) >= 0) play.params.push(i);
+      play.decoder = new VideoDecoder({
+        output: function (frame) { play.frames[frame.timestamp] = frame; },
+        error: function (err) {
+          previewMsg.textContent = "解码失败：" + err.message;
+          stopPlayback();
+        }
+      });
+      play.decoder.configure({ codec: cs, optimizeForLatency: true });
+      done();
+    }).catch(function (err) {
+      previewMsg.textContent = "配置失败：" + err.message;
+    });
+  }
+
+  function showPlayFrame(sliceIdx) {
+    var frame = play.frames[sliceIdx];
+    if (frame) {
+      drawVideoFrame(frame);
+      previewHint.textContent = "帧 " + timeline._slices[sliceIdx].frame + " / POC " + timeline._slices[sliceIdx].poc;
+    }
+    for (var k in play.frames) {
+      if (parseInt(k, 10) < sliceIdx - 2) { try { play.frames[k].close(); } catch (e) {} delete play.frames[k]; }
+    }
+  }
+
+  function stopPlayback() {
+    if (play.timer) { clearInterval(play.timer); play.timer = null; }
+    play.active = false;
+    previewPlayBtn.textContent = "▶ 播放";
+  }
+
+  function startPlayback() {
+    if (play.active) { stopPlayback(); return; }
+    var si = selectedSlice;
+    if (si < 0 || si >= timeline._slices.length) return;
+    var keySlice = findKeySlice(si);
+    if (keySlice < 0) { previewMsg.textContent = "未找到关键帧"; return; }
+    initPlayDecoder(function () {
+      play.active = true;
+      play.curSlice = si;
+      previewPlayBtn.textContent = "⏸ 暂停";
+      previewMsg.textContent = "";
+      feedSlices(si);
+      play.timer = setInterval(function () {
+        if (!play.active) return;
+        if (play.curSlice >= timeline._slices.length - 1) { stopPlayback(); return; }
+        showPlayFrame(play.curSlice);
+        play.curSlice++;
+        feedSlices(Math.min(play.curSlice + 10, timeline._slices.length - 1));
+      }, 40);
+    });
+  }
+
 
   function nalData(nal) {
     var off = nal.offset, len = nal.length;
@@ -432,35 +760,6 @@
     return null;
   }
 
-  function extractAccessUnits(keyIdx, targetIdx) {
-    var units = [];
-    var paramTypes = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
-    var paramIdx = [];
-    for (var i = 0; i < currentData.nalus.length; i++)
-      if (paramTypes.indexOf(currentData.nalus[i].type) >= 0) paramIdx.push(i);
-
-    function makeAu(nalIdxs, pocNalIdx) {
-      var len = 0;
-      for (var k = 0; k < nalIdxs.length; k++) len += currentData.nalus[nalIdxs[k]].length;
-      var data = new Uint8Array(len);
-      var o = 0;
-      for (var k2 = 0; k2 < nalIdxs.length; k2++) {
-        var nal = currentData.nalus[nalIdxs[k2]];
-        data.set(fileBytes.subarray(nal.offset, nal.offset + nal.length), o);
-        o += nal.length;
-      }
-      return { data: data, poc: currentData.nalus[pocNalIdx].slicePoc, isKey: isKeyNal(currentData.nalus[pocNalIdx].type) };
-    }
-
-    // 关键帧 AU = 参数集(SPS/PPS/VPS) + 关键帧 slice（原始 Annex B 字节）
-    units.push(makeAu(paramIdx.concat([keyIdx]), keyIdx));
-    // 后续 AU = 每个 slice 的原始 Annex B 字节
-    for (var i = keyIdx + 1; i <= targetIdx; i++)
-      if (isVclNal(currentData.nalus[i].type))
-        units.push(makeAu([i], i));
-    return units;
-  }
-
   function drawVideoFrame(frame) {
     var c = previewCanvas;
     var w = frame.displayWidth, h = frame.displayHeight;
@@ -484,62 +783,23 @@
       previewMsg.textContent = "当前浏览器不支持 WebCodecs";
       return;
     }
-    var target = timeline._slices[sliceIndex];
-    var targetNalIndex = target.index;
+    if (play.active) stopPlayback();
+    var keySlice = findKeySlice(sliceIndex);
+    if (keySlice < 0) { previewMsg.textContent = "未找到关键帧"; return; }
 
-    var keyIdx = -1;
-    for (var i = targetNalIndex; i >= 0; i--)
-      if (isKeyNal(currentData.nalus[i].type)) { keyIdx = i; break; }
-    if (keyIdx < 0) { previewMsg.textContent = "未找到关键帧"; return; }
-
-    var units = extractAccessUnits(keyIdx, targetNalIndex);
-    if (!units.length) { previewMsg.textContent = "无解码数据"; return; }
-
-    previewHint.textContent = "解码中…（POC " + target.poc + "）";
-    previewMsg.textContent = "";
     showTab("preview");
+    previewHint.textContent = "解码中…（POC " + timeline._slices[sliceIndex].poc + "）";
+    previewMsg.textContent = "";
 
-    var cs = codecString();
-    if (!cs) { previewMsg.textContent = "无法确定 codec 字符串"; return; }
-    // Annex B 裸流：无 description，直接喂原始字节
-    VideoDecoder.isConfigSupported({ codec: cs }).then(function (support) {
-      if (!support.supported) {
-        previewMsg.textContent = "当前浏览器不支持解码 " + cs + "（" + (currentCodec === "hevc" ? "H.265 可能受硬件/许可限制" : "H.264") + "）";
-        previewHint.textContent = "";
-        return;
-      }
-      if (previewDecoder && previewDecoder.state !== "closed") previewDecoder.close();
-      previewDecoder = new VideoDecoder({
-        output: function (frame) {
-          if (frame.timestamp === target.poc) {
-            drawVideoFrame(frame);
-            previewHint.textContent = "POC " + target.poc + "  " + frame.codedWidth + "×" + frame.codedHeight;
-          }
-          frame.close();
-        },
-        error: function (err) {
-          previewMsg.textContent = "解码失败：" + err.message;
-          previewHint.textContent = "";
+    initPlayDecoder(function () {
+      feedSlices(sliceIndex);
+      var check = setInterval(function () {
+        var frame = play.frames[sliceIndex];
+        if (frame) {
+          clearInterval(check);
+          showPlayFrame(sliceIndex);
         }
-      });
-      previewDecoder.configure({ codec: cs, optimizeForLatency: true });
-      var idx = 0;
-      function feed() {
-        if (idx >= units.length || previewDecoder.state !== "configured") return;
-        var au = units[idx++];
-        previewDecoder.decode(new EncodedVideoChunk({
-          type: au.isKey ? "key" : "delta",
-          timestamp: au.poc,
-          data: au.data
-        }));
-        feed();
-      }
-      try { feed(); } catch (err) {
-        previewMsg.textContent = "解码失败：" + err.message;
-      }
-    }).catch(function (err) {
-      previewMsg.textContent = "配置失败：" + err.message;
-      previewHint.textContent = "";
+      }, 10);
     });
   }
 
@@ -631,6 +891,8 @@
   tabPreview.addEventListener("click", function () { showTab("preview"); });
   tabHex.addEventListener("click", function () { showTab("hex"); });
 
+  previewPlayBtn.addEventListener("click", function () { startPlayback(); });
+
   // ---------- 文件处理 ----------
   function handleFile(file) {
     if (!file) return;
@@ -639,9 +901,21 @@
 
     var reader = new FileReader();
     reader.onload = function (e) {
-      fileBytes = new Uint8Array(e.target.result);
+      var rawBytes = new Uint8Array(e.target.result);
       try {
         var t0 = performance.now();
+        var srcNote = "";
+        if (isMp4(rawBytes)) {
+          var demuxed = demuxMp4(rawBytes);
+          if (!demuxed || !demuxed.annexb.length) {
+            setStatus("MP4 解封装失败：未找到视频轨道");
+            return;
+          }
+          fileBytes = demuxed.annexb;
+          srcNote = "（MP4 解封装）";
+        } else {
+          fileBytes = rawBytes;
+        }
         var result = parseBuffer(fileBytes);
         var t1 = performance.now();
         currentCodec = result.codec;
@@ -668,7 +942,7 @@
 
         if (currentData.nalus.length > 0) selectNal(0, false);
 
-        setStatus("解析完成：" + currentCodec.toUpperCase() + " 共 " + currentData.nalus.length + " 个 NAL 单元，耗时 " + (t1 - t0).toFixed(0) + " ms");
+        setStatus("解析完成：" + currentCodec.toUpperCase() + " 共 " + currentData.nalus.length + " 个 NAL 单元" + srcNote + "，耗时 " + (t1 - t0).toFixed(0) + " ms");
       } catch (err) {
         setStatus("解析失败：" + err.message);
         console.error(err);
@@ -696,8 +970,13 @@
     statsBar.classList.add("hidden");
     statsBar.innerHTML = "";
     timelinePanel.classList.add("hidden");
-    if (previewDecoder && previewDecoder.state !== "closed") previewDecoder.close();
-    previewDecoder = null;
+    if (play.timer) { clearInterval(play.timer); play.timer = null; }
+    if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
+    for (var pk in play.frames) { try { play.frames[pk].close(); } catch (e) {} }
+    play.frames = {};
+    play.active = false;
+    play.feedSlice = -1;
+    previewPlayBtn.textContent = "▶ 播放";
     mainArea.classList.add("hidden");
     bottomPanels.classList.add("hidden");
     resetBtn.classList.add("hidden");
