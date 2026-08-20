@@ -450,11 +450,12 @@
     if (slices.length === 0) return;
 
     var dpr = window.devicePixelRatio || 1;
-    var minBarW = 20 * timelineZoom;   // 每帧最小宽度（可缩放）
     var labelH = 24;       // 顶部帧号/POC 标记区
     var barH = 36;         // 色块区
     var wrapW = timeline.parentNode.clientWidth - 24;
-    var w = Math.max(wrapW, slices.length * minBarW);
+    var fitBarW = wrapW / slices.length;
+    var barW = Math.max(fitBarW, Math.max(1, 0.5 * timelineZoom));
+    var w = slices.length * barW;
     var h = labelH + barH;
     timeline.style.width = w + "px";
     timeline.style.height = h + "px";
@@ -463,8 +464,6 @@
     var ctx = timeline.getContext("2d");
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
-
-    var barW = w / slices.length;
     var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
     var barTop = labelH;
 
@@ -500,12 +499,18 @@
       '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b>' +
       ' <span style="color:var(--text-dim)"> | Frame# / POC | Click a frame to preview | Zoom</span>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
-      ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>';
+      ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>' +
+      ' <button class="zoom-btn" title="Prev frame" onclick="window.__tlStep(-1)">⏮</button>' +
+      ' <button class="zoom-btn" title="Next frame" onclick="window.__tlStep(1)">⏭</button>';
   }
 
   window.__tlZoom = function (d) {
     timelineZoom = Math.max(0.5, Math.min(6, timelineZoom + d * 0.5));
     renderTimeline();
+  };
+
+  window.__tlStep = function (delta) {
+    stepFrame(delta);
   };
 
   function timelineTip() {
@@ -874,7 +879,7 @@
     selectedSlice = si;
     selectNal(timeline._slices[si].index, true);
     renderTimeline();
-    previewFrame(si);
+    if (!previewView.classList.contains("hidden")) previewFrame(si);
   }
 
   // ---------- 文件处理 ----------
@@ -997,8 +1002,65 @@
     if (currentData) { renderTimeline(); updateVisibleRows(); }
   });
 
+  // ---------- 可拖拽调整大小 ----------
+  function firstColWidth(grid) {
+    var cs = getComputedStyle(grid);
+    var cols = cs.gridTemplateColumns.split(" ");
+    return parseFloat(cols[0]) || Math.round(grid.clientWidth * 0.44);
+  }
+
+  function makeSplitterCol(handleId, grid) {
+    var handle = document.getElementById(handleId);
+    if (!handle) return;
+    handle.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      handle.classList.add("dragging");
+      var startX = e.clientX;
+      var startFirst = firstColWidth(grid);
+      function move(ev) {
+        var dx = ev.clientX - startX;
+        var first = Math.max(160, Math.min(startFirst + dx, grid.clientWidth - 240));
+        grid.style.gridTemplateColumns = first + "px 5px 1fr";
+      }
+      function up() {
+        handle.classList.remove("dragging");
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+      }
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
+  function makeSplitterRow(handleId, lower) {
+    var handle = document.getElementById(handleId);
+    if (!handle) return;
+    handle.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      handle.classList.add("dragging");
+      var startY = e.clientY;
+      var startH = lower.offsetHeight;
+      function move(ev) {
+        var dy = ev.clientY - startY;
+        var h = startH + dy;
+        h = Math.max(60, Math.min(h, window.innerHeight - 200));
+        lower.style.flex = "0 0 " + h + "px";
+      }
+      function up() {
+        handle.classList.remove("dragging");
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+      }
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
   // ---------- 启动 ----------
   function boot() {
+    makeSplitterCol("splitMainCol", mainArea);
+    makeSplitterCol("splitBottomCol", bottomPanels);
+    makeSplitterRow("splitMainRow", bottomPanels);
     if (typeof createHevcModule !== "function") {
       setStatus("Error: WASM module (hevc.js) not found");
       return;
