@@ -473,8 +473,22 @@
     var barH = 36;         // 色块区
     var wrapW = timeline.parentNode.clientWidth - 24;
     var fitBarW = wrapW / slices.length;
-    var barW = Math.max(0.6, fitBarW * timelineZoom);
-    var w = slices.length * barW;
+    var barW = Math.max(0.8, fitBarW * timelineZoom);
+    var frameGap = Math.max(2, Math.round(barW * 0.8)); // 帧间物理空隙
+    var innerGap = Math.max(0, Math.round(barW * 0.12)); // 帧内 slice 微小间隙
+
+    // 计算每个 slice 的 x 坐标（帧之间插入物理空隙）
+    var xs = new Array(slices.length);
+    var cursor = 0;
+    for (var fi = 0; fi < frames.length; fi++) {
+      if (fi > 0) cursor += frameGap;
+      var f = frames[fi];
+      for (var si = f.first; si <= f.last; si++) {
+        xs[si] = cursor;
+        cursor += barW + innerGap;
+      }
+    }
+    var w = cursor;
     var h = labelH + barH;
     timeline.style.width = w + "px";
     timeline.style.height = h + "px";
@@ -492,15 +506,8 @@
     ctx.textBaseline = "middle";
     for (var i = 0; i < slices.length; i++) {
       var s = slices[i];
-      var x = i * barW;
       ctx.fillStyle = colors[s.type] || "#888";
-      ctx.fillRect(x, barTop, Math.max(1, barW - 0.5), barH);
-    }
-    // 帧间隔缝隙（在每帧边界画深色分隔，亮色块间高对比）
-    for (var fd = 1; fd < frames.length; fd++) {
-      var gapX = Math.floor(frames[fd].first * barW);
-      ctx.fillStyle = "rgba(15,15,15,0.9)";
-      ctx.fillRect(gapX, barTop, Math.max(1, barW * 0.5), barH);
+      ctx.fillRect(xs[i], barTop, Math.max(1, barW - 0.6), barH);
     }
     // 帧号 / POC 标记（只在每帧第一个 slice 处，保持 ~step 间距）
     var nextMark = 0;
@@ -508,27 +515,29 @@
       var fm = frames[m];
       if (fm.first < nextMark) continue;
       ctx.fillStyle = "#bbb";
-      ctx.fillText(String(fm.frameNum), fm.first * barW + 1, 8);               // 帧号
+      ctx.fillText(String(fm.frameNum), xs[fm.first] + 1, 8);               // 帧号
       ctx.fillStyle = "#777";
-      ctx.fillText(String(fm.poc), fm.first * barW + 1, labelH - 6);           // POC
+      ctx.fillText(String(fm.poc), xs[fm.first] + 1, labelH - 6);           // POC
       nextMark = fm.first + step;
     }
     // 高亮选中帧（若为帧首 slice 则框住整帧范围）
     if (selectedSlice >= 0 && selectedSlice < slices.length) {
-      var hx = selectedSlice * barW;
+      var hx = xs[selectedSlice];
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.5;
       var hlW = Math.max(1, barW - 1);
       for (var hi = 0; hi < frames.length; hi++) {
         if (frames[hi].first === selectedSlice) {
-          hlW = Math.max(1, (frames[hi].last - frames[hi].first + 1) * barW - 1);
+          hlW = Math.max(1, (frames[hi].last - frames[hi].first + 1) * (barW + innerGap) - innerGap - 1);
           break;
         }
       }
       ctx.strokeRect(hx + 0.5, barTop + 0.5, hlW, barH - 1);
     }
     timeline._slices = slices;
+    timeline._xs = xs;
     timeline._barW = barW;
+    timeline._frameGap = frameGap;
     timeline._labelH = labelH;
 
     var legend = document.getElementById("timelineLegend");
@@ -767,17 +776,28 @@ timeline.addEventListener("click", function (e) {
   }
 
   function codecString() {
+    function stripEP(ebsp) {
+      var out = [];
+      var z = 0;
+      for (var i = 0; i < ebsp.length; i++) {
+        var b = ebsp[i];
+        if (z >= 2 && b === 3) { z = 0; continue; }
+        out.push(b);
+        z = (b === 0) ? z + 1 : 0;
+      }
+      return new Uint8Array(out);
+    }
     if (currentCodec === "avc") {
       var si = findNalByType(7);
       if (si < 0) return null;
-      var sps = nalData(currentData.nalus[si]);
+      var sps = stripEP(nalData(currentData.nalus[si]));
       function hx(v) { var s = v.toString(16); return (s.length < 2 ? "0" : "") + s; }
       return "avc3." + hx(sps[1]) + hx(sps[2]) + hx(sps[3]);
     }
     if (currentCodec === "hevc") {
       var si = findNalByType(33);
       if (si < 0) return null;
-      var sps = nalData(currentData.nalus[si]);
+      var sps = stripEP(nalData(currentData.nalus[si]));
       var b1 = sps[3];
       var space = (b1 >> 6) & 3;
       var profileIdc = b1 & 0x1F;
