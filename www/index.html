@@ -3,19 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>H26xBrowser - H.264/H.265/H.266 Bitstream Analyzer</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23222'/%3E%3Ctext x='8' y='12' font-size='9' text-anchor='middle' fill='%2346a0ff' font-family='monospace' font-weight='bold'%3EH26%3C/text%3E%3C/svg%3E">
+  <title>CodecScope - H.264/H.265/H.266 Bitstream Analyzer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23222'/%3E%3Ctext x='8' y='12' font-size='7' text-anchor='middle' fill='%2346a0ff' font-family='monospace' font-weight='bold'%3EC%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="topbar">
-    <h1>H26x<span class="accent">Browser</span></h1>
+    <h1>Codec<span class="accent">Scope</span></h1>
     <div class="header-actions">
       <span id="codecBadge" class="codec-badge hidden"></span>
-      <button id="openBtn" class="btn">Open File</button>
       <button id="resetBtn" class="btn btn-secondary hidden">Reset</button>
       <input type="file" id="fileInput" hidden accept=".h264,.h265,.hevc,.h266,.vvc,.266,.265,.264,.avc,.bin,.bit,.mp4,.m4v,.mov">
       <span id="fileName" class="file-name">No file loaded</span>
+      <button id="helpBtn" class="btn btn-secondary" title="Help & About">? Help</button>
+      <span class="version-badge">v1.0.0</span>
+      <button id="openBtn" class="btn">Open File</button>
     </div>
   </header>
 
@@ -110,6 +112,39 @@
   <footer class="statusbar">
     <span id="status">Loading parser module...</span>
   </footer>
+
+  <div id="helpModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <span>CodecScope Help & About</span>
+        <button id="helpClose" class="btn btn-secondary btn-small">✕</button>
+      </div>
+      <div class="modal-body">
+        <h4>About</h4>
+        <ul>
+          <li><b>Name:</b> CodecScope — H.264 / H.265 / H.266 Bitstream Analyzer</li>
+          <li><b>Version:</b> v1.0.0</li>
+          <li><b>Author:</b> codec2021</li>
+          <li><b>Contact:</b> <a href="https://github.com/codec2021" target="_blank" rel="noopener">github.com/codec2021</a></li>
+        </ul>
+        <h4>Usage</h4>
+        <ul>
+          <li>Open or drag-and-drop a <b>.h264 / .h265 / .h266 / .mp4 / .mov</b> file.</li>
+          <li><b>NAL Unit List</b> — click a unit to inspect its syntax tree, Hex bytes, and locate the frame on the timeline.</li>
+          <li><b>Frame Structure</b> — timeline of slices colored by type (I=red, P=blue, B=green). Click a frame to preview; use <b>Zoom +/-</b> to resize, <b>⏮/⏭</b> to step frame by frame.</li>
+          <li><b>Syntax / Preview / Hex</b> tabs — switch between parsed element tree, decoded video preview, and raw bytes.</li>
+          <li><b>Play</b> — play decoded frames (rate follows the bitstream FPS when available).</li>
+          <li><b>Splitters</b> — drag the divider bars to resize columns / rows.</li>
+        </ul>
+        <h4>Supported</h4>
+        <ul>
+          <li>Elementary streams: H.264 (AVC), H.265 (HEVC), H.266 (VVC)</li>
+          <li>Containers: MP4 / M4V / MOV (auto-demux)</li>
+          <li>Browser decode (Preview / Play) requires WebCodecs + hardware codec support.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
 
   <script src="hevc.js"></script>
   <script src="js/app.js"></script>

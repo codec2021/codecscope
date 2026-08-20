@@ -41,7 +41,7 @@
   var previewNextBtn = document.getElementById("previewNextBtn");
 
   var ROW_HEIGHT = 22;
-  var timelineZoom = 1;   // 时间轴缩放倍数
+  var timelineZoom = 1.15;  // 时间轴缩放倍数
   var selectedSlice = -1; // 时间轴上选中的帧
   var previewCanvasTouched = false; // 预览 canvas 是否已被帧画面覆盖
 
@@ -473,7 +473,7 @@
     var barH = 36;         // 色块区
     var wrapW = timeline.parentNode.clientWidth - 24;
     var fitBarW = wrapW / slices.length;
-    var barW = Math.max(fitBarW, Math.max(1, 0.5 * timelineZoom));
+    var barW = Math.max(0.6, fitBarW * timelineZoom);
     var w = slices.length * barW;
     var h = labelH + barH;
     timeline.style.width = w + "px";
@@ -483,7 +483,7 @@
     var ctx = timeline.getContext("2d");
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
-    var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
+    var colors = { 2: "#E02020", 0: "#4d94e8", 1: "#00B050" };
     var barTop = labelH;
 
     // 色块
@@ -496,9 +496,9 @@
       ctx.fillStyle = colors[s.type] || "#888";
       ctx.fillRect(x, barTop, Math.max(1, barW - 0.5), barH);
     }
-    if (barW >= 3) {
+    if (barW >= 2) {
       for (var fd = 1; fd < frames.length; fd++) {
-        ctx.fillStyle = "rgba(255,255,255,0.25)";
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
         ctx.fillRect(frames[fd].first * barW, barTop, 1, barH);
       }
     }
@@ -533,7 +533,7 @@
 
     var legend = document.getElementById("timelineLegend");
     legend.innerHTML =
-      '<b style="color:#E02020">I</b> <b style="color:#0066ff">P</b> <b style="color:#00B050">B</b>' +
+      '<b style="color:#E02020">I</b> <b style="color:#4d94e8">P</b> <b style="color:#00B050">B</b>' +
       ' <span style="color:var(--text-dim)"> | Frame# / POC | Click a frame to preview | Zoom</span>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>' +
@@ -543,7 +543,9 @@
 
   var zoomRaf = 0;
   window.__tlZoom = function (d) {
-    timelineZoom = Math.max(0.5, Math.min(6, timelineZoom + d * 0.5));
+    if (d > 0) timelineZoom = timelineZoom * 1.5;
+    else timelineZoom = timelineZoom / 1.5;
+    timelineZoom = Math.max(0.25, Math.min(64, timelineZoom));
     if (zoomRaf) cancelAnimationFrame(zoomRaf);
     zoomRaf = requestAnimationFrame(function () {
       zoomRaf = 0;
@@ -1091,6 +1093,13 @@ timeline.addEventListener("click", function (e) {
     dropzone.classList.remove("dragover");
     if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
   });
+
+  var helpBtn = document.getElementById("helpBtn");
+  var helpModal = document.getElementById("helpModal");
+  var helpClose = document.getElementById("helpClose");
+  helpBtn.addEventListener("click", function () { helpModal.classList.remove("hidden"); });
+  helpClose.addEventListener("click", function () { helpModal.classList.add("hidden"); });
+  helpModal.addEventListener("click", function (e) { if (e.target === helpModal) helpModal.classList.add("hidden"); });
 
   window.addEventListener("resize", function () {
     if (currentData) { renderTimeline(); updateVisibleRows(); }
