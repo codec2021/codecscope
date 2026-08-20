@@ -38,7 +38,8 @@ body { display: flex; flex-direction: column; }
 .btn { flex: 0 0 auto; }
 
 .btn {
-  background: var(--accent); color: #fff; border: none; padding: 7px 16px;
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  padding: 6px 16px;
   border-radius: 4px; cursor: pointer; font-size: 13px;
 }
 .btn:hover { filter: brightness(1.1); }
@@ -49,10 +50,22 @@ body { display: flex; flex-direction: column; }
   border: 1px solid var(--border);
 }
 
-.file-name { color: var(--text-dim); }
+.header-actions .file-name,
+.header-actions .version-badge,
+.header-actions .btn {
+  border-radius: 999px;
+  line-height: 1;
+}
+.header-actions .btn { padding-top: 7px; padding-bottom: 7px; }
+
+.file-name {
+  color: var(--text-dim); font-size: 12px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  padding: 5px 12px; line-height: 1.4;
+}
 
 .version-badge {
-  padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500;
+  padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 500;
   background: var(--bg-elevated); color: var(--text-dim); border: 1px solid var(--border);
 }
 
@@ -76,7 +89,7 @@ body { display: flex; flex-direction: column; }
 .modal-body a { color: #7ec8ff; }
 
 .codec-badge {
-  padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600;
+  padding: 5px 14px; border-radius: 999px; font-size: 12px; font-weight: 600;
   background: var(--accent-soft); color: #7ec8ff; border: 1px solid var(--accent);
 }
 

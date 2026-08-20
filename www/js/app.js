@@ -496,11 +496,11 @@
       ctx.fillStyle = colors[s.type] || "#888";
       ctx.fillRect(x, barTop, Math.max(1, barW - 0.5), barH);
     }
-    if (barW >= 2) {
-      for (var fd = 1; fd < frames.length; fd++) {
-        ctx.fillStyle = "rgba(255,255,255,0.45)";
-        ctx.fillRect(frames[fd].first * barW, barTop, 1, barH);
-      }
+    // 帧间隔缝隙（在每帧边界画深色分隔，亮色块间高对比）
+    for (var fd = 1; fd < frames.length; fd++) {
+      var gapX = Math.floor(frames[fd].first * barW);
+      ctx.fillStyle = "rgba(15,15,15,0.9)";
+      ctx.fillRect(gapX, barTop, Math.max(1, barW * 0.5), barH);
     }
     // 帧号 / POC 标记（只在每帧第一个 slice 处，保持 ~step 间距）
     var nextMark = 0;
