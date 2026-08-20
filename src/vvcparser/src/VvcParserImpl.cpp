@@ -611,8 +611,8 @@ namespace VVC
       if(s.sps_general_hrd_params_present_flag)
       {
         // general_hrd_parameters（简化）
-        bs.getGolombU(); // num_units_in_tick
-        bs.getBits(32);  // time_scale
+        s.sps_num_units_in_tick = bs.getBits(32);
+        s.sps_time_scale = bs.getBits(32);
         bs.getBit();     // general_nal_hrd_params_present_flag
         bs.getBit();     // general_vcl_hrd_params_present_flag
         bs.getBit();     // general_same_pic_timing_in_all_ols_flag

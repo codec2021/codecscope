@@ -129,9 +129,9 @@ body { display: flex; flex-direction: column; }
 .nal-row:hover { background: #2a2d2e; }
 .nal-row.selected { background: var(--accent-soft); }
 
-.c-offset { flex: 0 0 88px; font-family: "SF Mono", Menlo, Consolas, monospace; }
-.c-length { flex: 0 0 64px; font-family: "SF Mono", Menlo, Consolas, monospace; text-align: right; padding-right: 12px; }
-.c-type { flex: 0 0 120px; font-family: "SF Mono", Menlo, Consolas, monospace; }
+.c-offset { flex: 0 0 96px; font-family: "SF Mono", Menlo, Consolas, monospace; }
+.c-length { flex: 0 0 84px; font-family: "SF Mono", Menlo, Consolas, monospace; text-align: right; padding-right: 18px; }
+.c-type { flex: 0 0 150px; font-family: "SF Mono", Menlo, Consolas, monospace; }
 .c-info { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
 
 .nal-header .c-offset, .nal-header .c-length, .nal-header .c-type, .nal-header .c-info { color: var(--text-dim); }

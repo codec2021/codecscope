@@ -487,6 +487,17 @@ namespace web
     }
     out += ",\"bitDepth\":" + std::to_string(hevcBitDepth);
     out += ",\"chromaFormat\":" + std::to_string(hevcChromaFormat);
+    double fps = -1;
+    if(m_lastSPS &&
+       m_lastSPS -> vui_parameters_present_flag &&
+       m_lastSPS -> vui_parameters.vui_timing_info_present_flag &&
+       m_lastSPS -> vui_parameters.vui_num_units_in_tick > 0 &&
+       m_lastSPS -> vui_parameters.vui_time_scale > 0)
+    {
+      fps = (double)m_lastSPS -> vui_parameters.vui_time_scale /
+            (double)m_lastSPS -> vui_parameters.vui_num_units_in_tick;
+    }
+    out += ",\"fps\":" + formatDouble(fps);
     out += "}";
 
     // HDR info

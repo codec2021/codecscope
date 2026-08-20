@@ -338,6 +338,20 @@ namespace web
     }
     out += ",\"bitDepth\":" + std::to_string(avcBitDepth);
     out += ",\"chromaFormat\":" + std::to_string(avcChromaFormat);
+    {
+      std::stringstream fpsS;
+      double fps = -1;
+      if(m_lastSPS && m_lastSPS->sps.vui_parameters_present_flag &&
+         m_lastSPS->sps.vui_parameters.timing_info_present_flag &&
+         m_lastSPS->sps.vui_parameters.num_units_in_tick > 0 &&
+         m_lastSPS->sps.vui_parameters.time_scale > 0)
+      {
+        fps = (double)m_lastSPS->sps.vui_parameters.time_scale /
+              (double)m_lastSPS->sps.vui_parameters.num_units_in_tick;
+      }
+      fpsS << fps;
+      out += ",\"fps\":" + fpsS.str();
+    }
     out += "}";
 
     // HDR

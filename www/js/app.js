@@ -314,6 +314,7 @@
     stat("Profile", si.profile);
     stat("Level", si.level);
     if (si.tier) stat("Tier", si.tier);
+    if (si.fps && parseFloat(si.fps) > 0) stat("FPS", si.fps);
   }
 
   // 虚拟滚动 NAL 列表
@@ -439,6 +440,21 @@
     hexView.innerHTML = out;
   }
 
+  function groupTimelineFrames(slices) {
+    var frames = [];
+    for (var i = 0; i < slices.length; i++) {
+      var s = slices[i];
+      var prev = frames.length > 0 ? frames[frames.length - 1] : null;
+      if (prev && prev.poc >= 0 && prev.poc === s.poc && prev.last === i - 1) {
+        prev.last = i;
+        prev.slices.push(i);
+        continue;
+      }
+      frames.push({ first: i, last: i, slices: [i], poc: s.poc, frameNum: s.frame });
+    }
+    return frames;
+  }
+
   // 帧时间轴（Slice 可视化，标记帧号 / POC）
   function renderTimeline() {
     var slices = [];
@@ -448,6 +464,9 @@
       }
     });
     if (slices.length === 0) return;
+
+    var frames = groupTimelineFrames(slices);
+    timeline._frames = frames;
 
     var dpr = window.devicePixelRatio || 1;
     var labelH = 24;       // 顶部帧号/POC 标记区
@@ -467,7 +486,7 @@
     var colors = { 2: "#E02020", 0: "#0066ff", 1: "#00B050" };
     var barTop = labelH;
 
-    // 色块 + 帧号 / POC 标记
+    // 色块
     var step = Math.max(1, Math.ceil(44 / barW)); // 每 ~44px 至少一个标记，避免重叠
     ctx.font = "9px monospace";
     ctx.textBaseline = "middle";
@@ -476,19 +495,37 @@
       var x = i * barW;
       ctx.fillStyle = colors[s.type] || "#888";
       ctx.fillRect(x, barTop, Math.max(1, barW - 0.5), barH);
-      if (i % step === 0) {
-        ctx.fillStyle = "#bbb";
-        ctx.fillText(String(s.frame), x + 1, 8);         // 帧号
-        ctx.fillStyle = "#777";
-        ctx.fillText(String(s.poc), x + 1, labelH - 6);  // POC
+    }
+    if (barW >= 3) {
+      for (var fd = 1; fd < frames.length; fd++) {
+        ctx.fillStyle = "rgba(255,255,255,0.25)";
+        ctx.fillRect(frames[fd].first * barW, barTop, 1, barH);
       }
     }
-    // 高亮选中帧
+    // 帧号 / POC 标记（只在每帧第一个 slice 处，保持 ~step 间距）
+    var nextMark = 0;
+    for (var m = 0; m < frames.length; m++) {
+      var fm = frames[m];
+      if (fm.first < nextMark) continue;
+      ctx.fillStyle = "#bbb";
+      ctx.fillText(String(fm.frameNum), fm.first * barW + 1, 8);               // 帧号
+      ctx.fillStyle = "#777";
+      ctx.fillText(String(fm.poc), fm.first * barW + 1, labelH - 6);           // POC
+      nextMark = fm.first + step;
+    }
+    // 高亮选中帧（若为帧首 slice 则框住整帧范围）
     if (selectedSlice >= 0 && selectedSlice < slices.length) {
       var hx = selectedSlice * barW;
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(hx + 0.5, barTop + 0.5, Math.max(1, barW - 1), barH - 1);
+      var hlW = Math.max(1, barW - 1);
+      for (var hi = 0; hi < frames.length; hi++) {
+        if (frames[hi].first === selectedSlice) {
+          hlW = Math.max(1, (frames[hi].last - frames[hi].first + 1) * barW - 1);
+          break;
+        }
+      }
+      ctx.strokeRect(hx + 0.5, barTop + 0.5, hlW, barH - 1);
     }
     timeline._slices = slices;
     timeline._barW = barW;
@@ -504,9 +541,14 @@
       ' <button class="zoom-btn" title="Next frame" onclick="window.__tlStep(1)">⏭</button>';
   }
 
+  var zoomRaf = 0;
   window.__tlZoom = function (d) {
     timelineZoom = Math.max(0.5, Math.min(6, timelineZoom + d * 0.5));
-    renderTimeline();
+    if (zoomRaf) cancelAnimationFrame(zoomRaf);
+    zoomRaf = requestAnimationFrame(function () {
+      zoomRaf = 0;
+      renderTimeline();
+    });
   };
 
   window.__tlStep = function (delta) {
@@ -535,16 +577,15 @@
     timelineTip().style.top = (e.clientY + 12) + "px";
   }
 
-   timeline.addEventListener("click", function (e) {
-     if (!timeline._slices) return;
+timeline.addEventListener("click", function (e) {
+     if (!timeline._slices || !timeline._frames) return;
      var rect = timeline.getBoundingClientRect();
      var x = e.clientX - rect.left;
      var idx = Math.floor(x / timeline._barW);
      if (idx >= 0 && idx < timeline._slices.length) {
-       selectedSlice = idx;
-       selectNal(timeline._slices[idx].index, true);
-       renderTimeline();
-       previewFrame(idx);
+       var fi = frameIndexOfSlice(idx);
+       var si = fi >= 0 ? timeline._frames[fi].first : idx;
+       syncSelectionFromNal(timeline._slices[si].index, true);
      }
    });
   timeline.addEventListener("mousemove", timelineMove);
@@ -556,15 +597,28 @@
     timer: null,
     decoder: null,
     params: [],
-    feedSlice: -1,
+    feedFrame: -1,
     frames: {},
-    curSlice: -1
+    curFrame: -1
   };
 
-  function findKeySlice(sliceIndex) {
-    for (var s = sliceIndex; s >= 0; s--) {
-      var nalIdx = timeline._slices[s].index;
-      if (isKeyNal(currentData.nalus[nalIdx].type)) return s;
+  function frameIndexOfSlice(sliceIdx) {
+    var frames = timeline._frames;
+    if (!frames) return -1;
+    for (var i = 0; i < frames.length; i++) {
+      if (sliceIdx >= frames[i].first && sliceIdx <= frames[i].last) return i;
+    }
+    return -1;
+  }
+
+  function findKeyFrame(frameIndex) {
+    var frames = timeline._frames;
+    if (!frames) return -1;
+    for (var f = frameIndex; f >= 0; f--) {
+      var sl = frames[f].slices;
+      for (var k = 0; k < sl.length; k++) {
+        if (isKeyNal(currentData.nalus[timeline._slices[sl[k]].index].type)) return f;
+      }
     }
     return -1;
   }
@@ -582,20 +636,25 @@
     return data;
   }
 
-  function feedSlices(toSlice) {
-    var slices = timeline._slices;
-    var end = Math.min(toSlice, slices.length - 1);
-    while (play.feedSlice < end && play.decoder && play.decoder.state === "configured") {
-      var si = play.feedSlice + 1;
-      var nalIdx = slices[si].index;
-      var isKey = isKeyNal(currentData.nalus[nalIdx].type);
-      var nals = isKey ? play.params.concat([nalIdx]) : [nalIdx];
+  function feedFrames(toFrame) {
+    var frames = timeline._frames;
+    if (!frames || frames.length === 0) return;
+    var end = Math.min(toFrame, frames.length - 1);
+    while (play.feedFrame < end && play.decoder && play.decoder.state === "configured") {
+      var fi = play.feedFrame + 1;
+      var nalIdxs = [];
+      var isKey = false;
+      for (var k = 0; k < frames[fi].slices.length; k++) {
+        var nalIdx = timeline._slices[frames[fi].slices[k]].index;
+        nalIdxs.push(nalIdx);
+        if (isKeyNal(currentData.nalus[nalIdx].type)) isKey = true;
+      }
       play.decoder.decode(new EncodedVideoChunk({
         type: isKey ? "key" : "delta",
-        timestamp: si,
-        data: makeAuData(nals)
+        timestamp: fi,
+        data: makeAuData(isKey ? play.params.concat(nalIdxs) : nalIdxs)
       }));
-      play.feedSlice = si;
+      play.feedFrame = fi;
     }
   }
 
@@ -610,7 +669,7 @@
       if (play.decoder) { try { play.decoder.close(); } catch (e) {} }
       for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
       play.frames = {};
-      play.feedSlice = -1;
+      play.feedFrame = -1;
       play.params = [];
       var types = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
       for (var i = 0; i < currentData.nalus.length; i++)
@@ -629,14 +688,15 @@
     });
   }
 
-  function showPlayFrame(sliceIdx) {
-    var frame = play.frames[sliceIdx];
+  function showPlayFrame(frameIndex) {
+    var frame = play.frames[frameIndex];
+    var f = timeline._frames[frameIndex];
     if (frame) {
       drawVideoFrame(frame);
-      previewHint.textContent = "Frame " + timeline._slices[sliceIdx].frame + " / POC " + timeline._slices[sliceIdx].poc;
+      previewHint.textContent = "Frame " + (f ? f.frameNum : frameIndex) + " / POC " + (f ? f.poc : frameIndex);
     }
     for (var k in play.frames) {
-      if (parseInt(k, 10) < sliceIdx - 2) { try { play.frames[k].close(); } catch (e) {} delete play.frames[k]; }
+      if (parseInt(k, 10) < frameIndex - 2) { try { play.frames[k].close(); } catch (e) {} delete play.frames[k]; }
     }
   }
 
@@ -648,23 +708,32 @@
 
   function startPlayback() {
     if (play.active) { stopPlayback(); return; }
-    var si = selectedSlice;
-    if (si < 0 || si >= timeline._slices.length) return;
-    var keySlice = findKeySlice(si);
-    if (keySlice < 0) { previewMsg.textContent = "Key frame not found"; return; }
+    var frames = timeline._frames;
+    if (!frames || frames.length === 0) return;
+    var fi = 0;
+    if (selectedSlice >= 0 && selectedSlice < timeline._slices.length) {
+      var ii = frameIndexOfSlice(selectedSlice);
+      if (ii >= 0) fi = ii;
+    }
+    if (findKeyFrame(fi) < 0) { previewMsg.textContent = "Key frame not found"; return; }
     initPlayDecoder(function () {
       play.active = true;
-      play.curSlice = si;
+      play.curFrame = fi;
       previewPlayBtn.textContent = "⏸ Pause";
       previewMsg.textContent = "";
-      feedSlices(si);
+      feedFrames(fi);
+      var iv = 40;
+      if (currentData && currentData.streamInfo) {
+        var fpsN = parseFloat(currentData.streamInfo.fps);
+        if (fpsN > 0) iv = Math.max(1, Math.round(1000 / fpsN));
+      }
       play.timer = setInterval(function () {
         if (!play.active) return;
-        if (play.curSlice >= timeline._slices.length - 1) { stopPlayback(); return; }
-        showPlayFrame(play.curSlice);
-        play.curSlice++;
-        feedSlices(Math.min(play.curSlice + 10, timeline._slices.length - 1));
-      }, 40);
+        if (play.curFrame >= frames.length - 1) { stopPlayback(); return; }
+        showPlayFrame(play.curFrame);
+        play.curFrame++;
+        feedFrames(Math.min(play.curFrame + 10, frames.length - 1));
+      }, iv);
     });
   }
 
@@ -759,19 +828,23 @@
       return;
     }
     if (play.active) stopPlayback();
-    var keySlice = findKeySlice(sliceIndex);
-    if (keySlice < 0) { previewMsg.textContent = "Key frame not found"; return; }
+    var frames = timeline._frames;
+    if (!frames || frames.length === 0) return;
+    var fi = frameIndexOfSlice(sliceIndex);
+    if (fi < 0) fi = 0;
+    if (findKeyFrame(fi) < 0) { previewMsg.textContent = "Key frame not found"; return; }
 
-    previewHint.textContent = "Decoding... (POC " + timeline._slices[sliceIndex].poc + ")";
+    var pf = frames[fi];
+    previewHint.textContent = "Decoding... (POC " + (pf ? pf.poc : "?") + ")";
     previewMsg.textContent = "";
 
     initPlayDecoder(function () {
-      feedSlices(sliceIndex);
+      feedFrames(fi);
       var check = setInterval(function () {
-        var frame = play.frames[sliceIndex];
+        var frame = play.frames[fi];
         if (frame) {
           clearInterval(check);
-          showPlayFrame(sliceIndex);
+          showPlayFrame(fi);
         }
       }, 10);
     });
@@ -838,9 +911,24 @@
     }
   }
 
+  function syncSelectionFromNal(nalIndex, scrollTo) {
+    if (!currentData || !timeline._slices) { selectNal(nalIndex, scrollTo); return; }
+    var si = -1;
+    for (var i = 0; i < timeline._slices.length; i++) {
+      if (timeline._slices[i].index === nalIndex) { si = i; break; }
+    }
+    if (si < 0) { selectNal(nalIndex, scrollTo); return; }
+    if (selectedSlice !== si) {
+      selectedSlice = si;
+      renderTimeline();
+      if (!previewView.classList.contains("hidden")) previewFrame(si);
+    }
+    selectNal(nalIndex, scrollTo);
+  }
+
   nalRows.addEventListener("click", function (e) {
     var row = e.target.closest(".nal-row");
-    if (row) selectNal(parseInt(row.dataset.index, 10), false);
+    if (row) syncSelectionFromNal(parseInt(row.dataset.index, 10), false);
   });
 
   nalScroll.addEventListener("scroll", updateVisibleRows);
@@ -872,14 +960,20 @@
 
   function stepFrame(delta) {
     if (play.active) stopPlayback();
-    var max = timeline._slices.length - 1;
-    var si = selectedSlice < 0 ? 0 : selectedSlice + delta;
-    si = Math.max(0, Math.min(si, max));
-    if (si < 0 || !timeline._slices[si]) return;
-    selectedSlice = si;
-    selectNal(timeline._slices[si].index, true);
+    var frames = timeline._frames;
+    if (!frames || frames.length === 0) return;
+    var fi = 0;
+    if (selectedSlice >= 0 && selectedSlice < timeline._slices.length) {
+      var ii = frameIndexOfSlice(selectedSlice);
+      if (ii >= 0) fi = ii;
+    }
+    fi += delta;
+    fi = Math.max(0, Math.min(fi, frames.length - 1));
+    var f = frames[fi];
+    selectedSlice = f.first;
+    selectNal(timeline._slices[f.first].index, true);
     renderTimeline();
-    if (!previewView.classList.contains("hidden")) previewFrame(si);
+    if (!previewView.classList.contains("hidden")) previewFrame(f.first);
   }
 
   // ---------- 文件处理 ----------
@@ -965,7 +1059,7 @@
     for (var pk in play.frames) { try { play.frames[pk].close(); } catch (e) {} }
     play.frames = {};
     play.active = false;
-    play.feedSlice = -1;
+    play.feedFrame = -1;
     previewPlayBtn.textContent = "▶ Play";
     mainArea.classList.add("hidden");
     bottomPanels.classList.add("hidden");

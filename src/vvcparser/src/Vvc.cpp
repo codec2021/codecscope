@@ -163,6 +163,8 @@ namespace VVC
     sps_virtual_boundary_pos_y_minus1.clear();
     sps_timing_hrd_params_present_flag = 0;
     sps_general_hrd_params_present_flag = 0;
+    sps_num_units_in_tick = 0;
+    sps_time_scale = 0;
     sps_field_seq_flag = 0;
     sps_vui_parameters_present_flag = 0;
     sps_vui_payload_size_minus1 = 0;

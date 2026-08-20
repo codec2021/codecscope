@@ -326,6 +326,19 @@ namespace web
     else
       out += ",\"level\":\"NOT PRESENT\"";
     out += ",\"tier\":\"\"";
+    {
+      std::stringstream fpsS;
+      double fps = -1;
+      if(m_lastSPS && m_lastSPS->sps.sps_general_hrd_params_present_flag &&
+         m_lastSPS->sps.sps_time_scale > 0 &&
+         m_lastSPS->sps.sps_num_units_in_tick > 0)
+      {
+        fps = (double)m_lastSPS->sps.sps_time_scale /
+              (double)m_lastSPS->sps.sps_num_units_in_tick;
+      }
+      fpsS << fps;
+      out += ",\"fps\":" + fpsS.str();
+    }
     out += "}";
 
     out += ",\"hdr\":{";

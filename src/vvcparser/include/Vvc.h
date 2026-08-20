@@ -214,6 +214,8 @@ namespace VVC
     std::vector<uint32_t> sps_virtual_boundary_pos_y_minus1;
     uint8_t  sps_timing_hrd_params_present_flag;
     uint8_t  sps_general_hrd_params_present_flag;
+    uint32_t sps_num_units_in_tick;
+    uint32_t sps_time_scale;
     uint8_t  sps_field_seq_flag;
     uint8_t  sps_vui_parameters_present_flag;
     uint8_t  sps_vui_payload_size_minus1;
