@@ -43,6 +43,7 @@
   var ROW_HEIGHT = 22;
   var timelineZoom = 1;   // 时间轴缩放倍数
   var selectedSlice = -1; // 时间轴上选中的帧
+  var previewCanvasTouched = false; // 预览 canvas 是否已被帧画面覆盖
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function hex8(v) { var s = v.toString(16); while (s.length < 8) s = "0" + s; return "0x" + s; }
@@ -725,6 +726,7 @@
     var scale = Math.min(1, maxW / w, maxH / h);
     c.width = Math.max(1, Math.round(w * scale));
     c.height = Math.max(1, Math.round(h * scale));
+    previewCanvasTouched = true;
     var ctx = c.getContext("2d");
     ctx.drawImage(frame, 0, 0, c.width, c.height);
   }
@@ -852,6 +854,7 @@
     syntaxTree.classList.toggle("hidden", which !== "syntax");
     previewView.classList.toggle("hidden", which !== "preview");
     hexView.classList.toggle("hidden", which !== "hex");
+    if (which === "preview" && currentData && !previewCanvasTouched) presetPreviewCanvas();
   }
 
   tabSyntax.addEventListener("click", function () { showTab("syntax"); });
@@ -971,6 +974,7 @@
     hexView.innerHTML = "";
     previewMsg.textContent = "Click a frame on the timeline to preview";
     previewHint.textContent = "";
+    previewCanvasTouched = false;
     showTab("syntax");
     hdrInfo.innerHTML = "";
     warningBody.innerHTML = "";
