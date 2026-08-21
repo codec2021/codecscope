@@ -672,7 +672,7 @@ timeline.addEventListener("click", function (e) {
     feedFrame: -1,
     frames: {},
     curFrame: -1,
-    displayOrder: true,   // true=显示顺序(POC), false=解码顺序
+    displayOrder: false,  // true=显示顺序(POC), false=解码顺序
     order: null,          // 显示顺序的帧索引(fi)列表
     orderPos: -1          // 显示游标（order 数组下标）
   };
@@ -825,8 +825,10 @@ timeline.addEventListener("click", function (e) {
       drawVideoFrame(frame);
       previewHint.textContent = "Frame " + (f ? f.frameNum : frameIndex) + " / POC " + (f ? f.poc : frameIndex);
     }
+    // 基于解码游标清理：只回收很早解码且不会再显示的帧
+    var threshold = play.feedFrame - 24;
     for (var k in play.frames) {
-      if (parseInt(k, 10) < frameIndex - 2) { try { play.frames[k].close(); } catch (e) {} delete play.frames[k]; }
+      if (parseInt(k, 10) < threshold) { try { play.frames[k].close(); } catch (e) {} delete play.frames[k]; }
     }
   }
 
