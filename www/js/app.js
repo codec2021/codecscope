@@ -351,7 +351,7 @@
       timeline._baseSliceCount = slices.length;
     }
 
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(timeline._base, 0, 0, w * dpr, h * dpr, 0, 0, w, h);
 
