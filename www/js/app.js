@@ -47,230 +47,23 @@
   var selectedSlice = -1; // 时间轴上选中的帧
   var previewCanvasTouched = false; // 预览 canvas 是否已被帧画面覆盖
 
+  // 时间轴布局常量
+  var TL_LABEL_H = 24;        // 顶部帧号/POC 标记区高度(px)
+  var TL_BAR_H = 36;          // 色块区高度(px)
+  var TL_MIN_BAR_W = 0.8;     // 色块最小宽度(px)
+  var TL_FRAME_GAP_RATIO = 0.8; // 帧间空隙 = barW * 该比例（至少 2px）
+  var TL_INNER_GAP_RATIO = 0.12; // 帧内 slice 间隙 = barW * 该比例
+  var TL_MARK_STEP = 44;      // 帧号/POC 标记至少间隔(px)
+  var TL_ZOOM_STEP = 1.5;     // 缩放每步倍数
+  var TL_ZOOM_MIN = 0.25;     // 最小缩放
+  var TL_ZOOM_MAX = 64;       // 最大缩放
+  // 播放常量
+  var PLAY_DECODE_LEAD = 16;  // 播放时解码领先帧数
+  var PLAY_FRAME_KEEP = 24;   // 保留最近多少已解码帧
+  var PLAY_PREVIEW_TIMEOUT = 10000; // 单帧预览解码超时(ms)
+
   function setStatus(msg) { statusEl.textContent = msg; }
   function hex8(v) { var s = v.toString(16); while (s.length < 8) s = "0" + s; return "0x" + s; }
-
-  // ---------- MP4 解封装 ----------
-  function readU32(d, o) { return (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]; }
-  function readU16(d, o) { return (d[o] << 8) | d[o + 1]; }
-  function fourCC(d, o) { return String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]); }
-  function isMp4(d) { return d.length >= 12 && fourCC(d, 4) === "ftyp"; }
-  function boxSize(d, o) {
-    var size = readU32(d, o);
-    if (size === 1) return readU32(d, o + 8) * 4294967296 + readU32(d, o + 12); // 64-bit largesize
-    return size;
-  }
-
-  function findBox(d, start, end, type) {
-    var i = start;
-    while (i + 8 <= end) {
-      var size = boxSize(d, i);
-      if (size < 8 || i + size > end) break;
-      if (fourCC(d, i + 4) === type) return { offset: i, size: size };
-      i += size;
-    }
-    return null;
-  }
-
-  function findFourCC(d, start, end, cc) {
-    for (var i = start; i + 4 <= end; i++) {
-      if (fourCC(d, i) === cc) return { offset: i - 4, size: readU32(d, i - 4) };
-    }
-    return null;
-  }
-
-  function nalToAnnexB(nals) {
-    // nals: array of Uint8Array（已是 EBSP，含 emulation prevention）
-    var out = [];
-    for (var j = 0; j < nals.length; j++) {
-      out.push(0, 0, 0, 1);
-      for (var k = 0; k < nals[j].length; k++) out.push(nals[j][k]);
-    }
-    return new Uint8Array(out);
-  }
-
-  function demuxMp4(d) {
-    var moov = null;
-    var i = 0;
-    while (i + 8 <= d.length) {
-      var size = boxSize(d, i);
-      if (size < 8 || i + size > d.length) break;
-      if (fourCC(d, i + 4) === "moov") { moov = { offset: i + 8, end: i + size }; break; }
-      i += size;
-    }
-    if (!moov) return null;
-
-    // 找视频轨道
-    var trakStart = moov.offset;
-    var result = null;
-    while (trakStart + 8 <= moov.end && !result) {
-      var trakSize = boxSize(d, trakStart);
-      if (trakSize < 8) break;
-      if (fourCC(d, trakStart + 4) === "trak") {
-        var trakEnd = trakStart + trakSize;
-        var mdia = findBox(d, trakStart + 8, trakEnd, "mdia");
-        if (mdia) {
-          var hdlr = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "hdlr");
-          if (hdlr && fourCC(d, hdlr.offset + 16) === "vide") {
-            var minf = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "minf");
-            if (minf) {
-              var stbl = findBox(d, minf.offset + 8, minf.offset + minf.size, "stbl");
-              if (stbl) result = parseStbl(d, stbl.offset + 8, stbl.offset + stbl.size);
-            }
-          }
-        }
-      }
-      trakStart += trakSize;
-    }
-    return result;
-  }
-
-  function parseStbl(d, start, end) {
-    var stsd = findBox(d, start, end, "stsd");
-    var stsz = findBox(d, start, end, "stsz");
-    var stsc = findBox(d, start, end, "stsc");
-    var stco = findBox(d, start, end, "stco") || findBox(d, start, end, "co64");
-
-    if (!stsd || !stsz || !stco) return null;
-
-    // 从 stsd 提取 codec + SPS/PPS
-    var codec = null;
-    var paramNals = []; // 参数集 NAL（RBSP，含 VPS/SPS/PPS）
-    var description = null; // 完整 hvcC/avcC 配置记录字节（供解码器）
-    var nalLengthSize = 4;
-    var sdEnd = stsd.offset + stsd.size;
-    var p = stsd.offset + 16; // 跳过 version+flags(4) + entry_count(4)，到第一个 sample entry
-    if (p + 8 <= sdEnd) {
-      var fmt = fourCC(d, p + 4);
-      if (fmt === "avc1" || fmt === "avc3") codec = "avc";
-      if (fmt === "hev1" || fmt === "hvc1") codec = "hevc";
-      if (fmt === "vvc1" || fmt === "vvi1") codec = "vvc";
-      // 在 stsd 里搜 avcC/hvcC/vvcC box（fourcc 字节搜索）
-      var cfg = findFourCC(d, stsd.offset + 8, sdEnd, "avcC") || findFourCC(d, stsd.offset + 8, sdEnd, "hvcC") || findFourCC(d, stsd.offset + 8, sdEnd, "vvcC");
-      if (cfg) {
-        var c = cfg.offset + 8; // 配置内容
-        var cEnd = cfg.offset + cfg.size;
-        description = d.subarray(c, cEnd);
-        if (codec === "avc") {
-          nalLengthSize = 1 + (description[4] & 0x03); // avcC offset 4 低 2 位 lengthSizeMinusOne
-          // avcC: version(1)+profile(1)+compat(1)+level(1)+0xFF+0xE1+spslen(2)+sps+numPPS(1)+ppslen(2)+pps
-          var spsLen = readU16(d, c + 6);
-          paramNals.push(d.subarray(c + 8, c + 8 + spsLen));
-          var np = c + 8 + spsLen;
-          var numPps = d[np];
-          np += 1;
-          for (var q = 0; q < numPps; q++) {
-            var ppsLen = readU16(d, np);
-            paramNals.push(d.subarray(np + 2, np + 2 + ppsLen));
-            np += 2 + ppsLen;
-          }
-        } else if (codec === "hevc" || codec === "vvc") {
-          nalLengthSize = 1 + (description[21] & 0x03); // hvcC offset 21 低 2 位 lengthSizeMinusOne
-          // hvcC/vvcC: 23-byte header（numOfArrays 在 offset 22），然后 arrays
-          var na = d[c + 22];
-          var np2 = c + 23;
-          for (var q2 = 0; q2 < na; q2++) {
-            var ntype = d[np2] & 0x3F;
-            var numNalus = readU16(d, np2 + 1);
-            np2 += 3;
-            for (var q3 = 0; q3 < numNalus; q3++) {
-              var nlen = readU16(d, np2);
-              // 只保留 VPS/SPS/PPS（32/33/34），跳过 SEI(39) 等
-              if (ntype === 32 || ntype === 33 || ntype === 34)
-                paramNals.push(d.subarray(np2 + 2, np2 + 2 + nlen));
-              np2 += 2 + nlen;
-            }
-          }
-        }
-      }
-    }
-    if (!codec) return null;
-
-    // stsz：样本大小
-    var sampleSizes = [];
-    var uniformSize = readU32(d, stsz.offset + 12);   // sample_size
-    var szCount = readU32(d, stsz.offset + 16);        // sample_count
-    if (uniformSize > 0) {
-      for (var s1 = 0; s1 < szCount; s1++) sampleSizes.push(uniformSize);
-    } else {
-      for (var s2 = 0; s2 < szCount; s2++) sampleSizes.push(readU32(d, stsz.offset + 20 + s2 * 4));
-    }
-
-    // stco：chunk offset
-    var chunkOffsets = [];
-    var coCount = readU32(d, stco.offset + 12);         // entry_count
-    var co64 = fourCC(d, stco.offset + 4) === "co64";
-    for (var c1 = 0; c1 < coCount; c1++) {
-      if (co64) {
-        var hi = readU32(d, stco.offset + 16 + c1 * 8);
-        var lo = readU32(d, stco.offset + 20 + c1 * 8);
-        chunkOffsets.push(hi * 4294967296 + lo);
-      } else {
-        chunkOffsets.push(readU32(d, stco.offset + 16 + c1 * 4));
-      }
-    }
-
-    // stsc：sample to chunk
-    var stscEntries = [];
-    if (stsc) {
-      var scCount = readU32(d, stsc.offset + 12);       // entry_count
-      for (var sc = 0; sc < scCount; sc++) {
-        stscEntries.push({
-          firstChunk: readU32(d, stsc.offset + 16 + sc * 12),
-          samplesPerChunk: readU32(d, stsc.offset + 20 + sc * 12)
-        });
-      }
-    } else {
-      stscEntries.push({ firstChunk: 1, samplesPerChunk: 1 });
-    }
-
-    // 构建 chunk → 样本数 映射
-    var sampleOffsets = [];
-    var chunkSampleCount = [];
-    var sampleIndex = 0;
-    var chunkIndex = 0;
-    var dataOffset = 0;
-    while (sampleIndex < sampleSizes.length && chunkIndex < chunkOffsets.length) {
-      // 当前 chunk 的 samplesPerChunk
-      var spc = 1;
-      for (var e = 0; e < stscEntries.length; e++) {
-        if (stscEntries[e].firstChunk <= chunkIndex + 1) spc = stscEntries[e].samplesPerChunk;
-      }
-      for (var k = 0; k < spc && sampleIndex < sampleSizes.length; k++) {
-        sampleOffsets.push(chunkOffsets[chunkIndex] + dataOffset);
-        dataOffset += sampleSizes[sampleIndex];
-        sampleIndex++;
-      }
-      chunkIndex++;
-      dataOffset = 0;
-    }
-
-    // 组装 Annex B 裸流：先收集 NAL 列表（subarray 引用，不复制），再一次性分配
-    var nalList = [];
-    for (var pn = 0; pn < paramNals.length; pn++) nalList.push(paramNals[pn]);
-    for (var si2 = 0; si2 < sampleOffsets.length; si2++) {
-      var sample = d.subarray(sampleOffsets[si2], sampleOffsets[si2] + sampleSizes[si2]);
-      var p2 = 0;
-      while (p2 + 4 <= sample.length) {
-        var nlen = (sample[p2] << 24) | (sample[p2 + 1] << 16) | (sample[p2 + 2] << 8) | sample[p2 + 3];
-        p2 += 4;
-        if (nlen < 0 || p2 + nlen > sample.length) break;
-        nalList.push(sample.subarray(p2, p2 + nlen));
-        p2 += nlen;
-      }
-    }
-    var totalSize = 0;
-    for (var q = 0; q < nalList.length; q++) totalSize += nalList[q].length + 4;
-    var out = new Uint8Array(totalSize);
-    var w = 0;
-    for (var q2 = 0; q2 < nalList.length; q2++) {
-      out[w] = 0; out[w + 1] = 0; out[w + 2] = 0; out[w + 3] = 1;
-      w += 4;
-      out.set(nalList[q2], w);
-      w += nalList[q2].length;
-    }
-    return { codec: codec, annexb: out, description: description, nalLengthSize: nalLengthSize };
-  }
 
   // ---------- WASM 封装 ----------
   function parseBuffer(bytes) {
@@ -333,27 +126,36 @@
     updateVisibleRows();
   }
 
-  function annotateFrameIndex() {
-    // 为每个 NAL 计算所属帧号（frameIdx），供 NAL 列表显示
-    // 依据 first_slice_segment_in_pic_flag=1 判定帧边界；无该字段时按 POC 连续分组
+  // 一次遍历完成：收集 slice、按帧分组、标注每个 NAL 的 frameIdx
+  function computeFrames() {
     var nalus = currentData.nalus;
-    var frameIdx = -1;
+    var slices = [];
+    var frames = [];
     var hasFirstSlice = false;
-    for (var i = 0; i < nalus.length; i++) if (nalus[i].sliceType >= 0) { hasFirstSlice = nalus[i].firstSlice !== undefined; break; }
-    var prevPoc = null;
+    for (var i = 0; i < nalus.length; i++) {
+      if (nalus[i].sliceType >= 0) { hasFirstSlice = nalus[i].firstSlice !== undefined; break; }
+    }
     for (var j = 0; j < nalus.length; j++) {
       var n = nalus[j];
       if (n.sliceType < 0) { n.frameIdx = -1; continue; }
-      var isNewFrame;
+      slices.push({ index: j, type: n.sliceType, poc: n.slicePoc, firstSlice: n.firstSlice });
+      var si = slices.length - 1;
+      var prev = frames.length > 0 ? frames[frames.length - 1] : null;
+      var sameFrame = false;
       if (hasFirstSlice) {
-        isNewFrame = n.firstSlice === 1;
+        sameFrame = prev !== null && n.firstSlice === 0;
       } else {
-        isNewFrame = prevPoc === null || prevPoc !== n.slicePoc || n.slicePoc < 0;
+        sameFrame = prev !== null && prev.poc >= 0 && prev.poc === n.slicePoc && prev.last === si - 1;
       }
-      if (isNewFrame) { frameIdx++; }
-      n.frameIdx = frameIdx;
-      if (n.slicePoc !== undefined) prevPoc = n.slicePoc;
+      if (sameFrame) {
+        prev.last = si;
+        prev.slices.push(si);
+      } else {
+        frames.push({ first: si, last: si, slices: [si], poc: n.slicePoc, frameNum: frames.length });
+      }
+      n.frameIdx = frames.length - 1;
     }
+    return { slices: slices, frames: frames };
   }
 
   function makeRow(i) {
@@ -475,50 +277,22 @@
     hexView.innerHTML = out;
   }
 
-  function groupTimelineFrames(slices) {
-    var frames = [];
-    var hasFirstSlice = slices.length > 0 && slices[0].firstSlice !== undefined;
-    for (var i = 0; i < slices.length; i++) {
-      var s = slices[i];
-      var prev = frames.length > 0 ? frames[frames.length - 1] : null;
-      var sameFrame = false;
-      if (hasFirstSlice) {
-        // first_slice_segment_in_pic_flag=1 表示新帧开始，0 表示同帧后续 slice
-        sameFrame = prev !== null && s.firstSlice === 0;
-      } else {
-        sameFrame = prev !== null && prev.poc >= 0 && prev.poc === s.poc && prev.last === i - 1;
-      }
-      if (sameFrame) {
-        prev.last = i;
-        prev.slices.push(i);
-        continue;
-      }
-      frames.push({ first: i, last: i, slices: [i], poc: s.poc, frameNum: frames.length });
-    }
-    return frames;
-  }
-
   // 帧时间轴（Slice 可视化，标记帧号 / POC）
   function renderTimeline() {
-    var slices = [];
-    currentData.nalus.forEach(function (n, i) {
-      if (n.sliceType >= 0) {
-        slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum, firstSlice: n.firstSlice });
-      }
-    });
+    var cf = computeFrames();
+    var slices = cf.slices;
     if (slices.length === 0) return;
-
-    var frames = groupTimelineFrames(slices);
+    var frames = cf.frames;
     timeline._frames = frames;
 
     var dpr = window.devicePixelRatio || 1;
-    var labelH = 24;       // 顶部帧号/POC 标记区
-    var barH = 36;         // 色块区
+    var labelH = TL_LABEL_H;
+    var barH = TL_BAR_H;
     var wrapW = timeline.parentNode.clientWidth - 24;
     var fitBarW = wrapW / slices.length;
-    var barW = Math.max(0.8, fitBarW * timelineZoom);
-    var frameGap = Math.max(2, Math.round(barW * 0.8)); // 帧间物理空隙
-    var innerGap = Math.max(0, Math.round(barW * 0.12)); // 帧内 slice 微小间隙
+    var barW = Math.max(TL_MIN_BAR_W, fitBarW * timelineZoom);
+    var frameGap = Math.max(2, Math.round(barW * TL_FRAME_GAP_RATIO));
+    var innerGap = Math.max(0, Math.round(barW * TL_INNER_GAP_RATIO));
 
     // 计算每个 slice 的 x 坐标（帧之间插入物理空隙）
     var xs = new Array(slices.length);
@@ -538,31 +312,49 @@
     timeline.width = w * dpr;
     timeline.height = h * dpr;
     var ctx = timeline.getContext("2d");
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, w, h);
     var colors = { 2: "#E02020", 0: "#4d94e8", 1: "#00B050" };
     var barTop = labelH;
+    var step = Math.max(1, Math.ceil(TL_MARK_STEP / barW));
 
-    // 色块
-    var step = Math.max(1, Math.ceil(44 / barW)); // 每 ~44px 至少一个标记，避免重叠
-    ctx.font = "9px monospace";
-    ctx.textBaseline = "middle";
-    for (var i = 0; i < slices.length; i++) {
-      var s = slices[i];
-      ctx.fillStyle = colors[s.type] || "#888";
-      ctx.fillRect(xs[i], barTop, Math.max(1, barW - 0.6), barH);
+    // 底图缓存：尺寸或 zoom 变化时重绘底图（色块+标记），否则复用离屏底图
+    var baseDirty = !timeline._base || timeline._baseBarW !== barW || timeline._baseSliceCount !== slices.length;
+    if (baseDirty) {
+      var base = timeline._base;
+      if (!base || base.width !== w * dpr || base.height !== h * dpr) {
+        base = document.createElement("canvas");
+        base.width = w * dpr;
+        base.height = h * dpr;
+        timeline._base = base;
+      }
+      var bctx = base.getContext("2d");
+      bctx.setTransform(1, 0, 0, 1, 0, 0);
+      bctx.scale(dpr, dpr);
+      bctx.clearRect(0, 0, w, h);
+      bctx.font = "9px monospace";
+      bctx.textBaseline = "middle";
+      for (var i = 0; i < slices.length; i++) {
+        var s = slices[i];
+        bctx.fillStyle = colors[s.type] || "#888";
+        bctx.fillRect(xs[i], barTop, Math.max(1, barW - 0.6), barH);
+      }
+      var nextMark = 0;
+      for (var m = 0; m < frames.length; m++) {
+        var fm = frames[m];
+        if (fm.first < nextMark) continue;
+        bctx.fillStyle = "#bbb";
+        bctx.fillText(String(fm.frameNum), xs[fm.first] + 1, 8);               // 帧号
+        bctx.fillStyle = "#777";
+        bctx.fillText(String(fm.poc), xs[fm.first] + 1, labelH - 6);           // POC
+        nextMark = fm.first + step;
+      }
+      timeline._baseBarW = barW;
+      timeline._baseSliceCount = slices.length;
     }
-    // 帧号 / POC 标记（只在每帧第一个 slice 处，保持 ~step 间距）
-    var nextMark = 0;
-    for (var m = 0; m < frames.length; m++) {
-      var fm = frames[m];
-      if (fm.first < nextMark) continue;
-      ctx.fillStyle = "#bbb";
-      ctx.fillText(String(fm.frameNum), xs[fm.first] + 1, 8);               // 帧号
-      ctx.fillStyle = "#777";
-      ctx.fillText(String(fm.poc), xs[fm.first] + 1, labelH - 6);           // POC
-      nextMark = fm.first + step;
-    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(timeline._base, 0, 0, w * dpr, h * dpr, 0, 0, w, h);
+
     // 高亮选中帧（若为帧首 slice 则框住整帧范围）
     if (selectedSlice >= 0 && selectedSlice < slices.length) {
       var hx = xs[selectedSlice];
@@ -598,9 +390,9 @@
 
   var zoomRaf = 0;
   window.__tlZoom = function (d) {
-    if (d > 0) timelineZoom = timelineZoom * 1.5;
-    else timelineZoom = timelineZoom / 1.5;
-    timelineZoom = Math.max(0.25, Math.min(64, timelineZoom));
+    if (d > 0) timelineZoom = timelineZoom * TL_ZOOM_STEP;
+    else timelineZoom = timelineZoom / TL_ZOOM_STEP;
+    timelineZoom = Math.max(TL_ZOOM_MIN, Math.min(TL_ZOOM_MAX, timelineZoom));
     if (zoomRaf) cancelAnimationFrame(zoomRaf);
     zoomRaf = requestAnimationFrame(function () {
       zoomRaf = 0;
@@ -837,7 +629,7 @@ timeline.addEventListener("click", function (e) {
       previewHint.textContent = "Frame " + (f ? f.frameNum : frameIndex) + " / POC " + (f ? f.poc : frameIndex);
     }
     // 基于解码游标清理：只回收很早解码且不会再显示的帧
-    var threshold = play.feedFrame - 24;
+    var threshold = play.feedFrame - PLAY_FRAME_KEEP;
     for (var k in play.frames) {
       if (parseInt(k, 10) < threshold) { try { play.frames[k].close(); } catch (e) {} delete play.frames[k]; }
     }
@@ -886,7 +678,7 @@ timeline.addEventListener("click", function (e) {
           var target = play.order[play.orderPos];
           if (play.frames[target]) { showPlayFrame(target); play.orderPos++; }
           // 解码始终按解码顺序领先：喂到 target 之后若干帧
-          feedFrames(Math.min(target + 16, frames.length - 1));
+          feedFrames(Math.min(target + PLAY_DECODE_LEAD, frames.length - 1));
         } else {
           if (play.curFrame >= frames.length - 1) { stopPlayback(); return; }
           showPlayFrame(play.curFrame);
@@ -1035,7 +827,7 @@ timeline.addEventListener("click", function (e) {
           return;
         }
         waited += 10;
-        if (waited > 10000) {
+        if (waited > PLAY_PREVIEW_TIMEOUT) {
           clearInterval(check);
           if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
         }
@@ -1186,8 +978,8 @@ timeline.addEventListener("click", function (e) {
       try {
         var t0 = performance.now();
         var srcNote = "";
-        if (isMp4(rawBytes)) {
-          var demuxed = demuxMp4(rawBytes);
+        if (H26xDemux.isMp4(rawBytes)) {
+          var demuxed = H26xDemux.demuxMp4(rawBytes);
           if (!demuxed || !demuxed.annexb.length) {
             setStatus("MP4 demux failed: no video track found");
             return;
@@ -1206,7 +998,7 @@ timeline.addEventListener("click", function (e) {
         currentCodec = result.codec;
         currentData = result.data;
         currentWarnings = result.data.warnings || [];
-        annotateFrameIndex();
+        computeFrames();
 
         codecBadge.textContent = currentCodec.toUpperCase();
         codecBadge.classList.remove("hidden");
@@ -1249,6 +1041,9 @@ timeline.addEventListener("click", function (e) {
     currentDescription = null;
     currentNalLengthSize = 4;
     selectedIndex = -1;
+    timeline._base = null;
+    timeline._baseBarW = null;
+    timeline._baseSliceCount = null;
 
     codecBadge.classList.add("hidden");
     codecBadge.textContent = "";
