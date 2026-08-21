@@ -493,7 +493,7 @@
         prev.slices.push(i);
         continue;
       }
-      frames.push({ first: i, last: i, slices: [i], poc: s.poc, frameNum: s.frame });
+      frames.push({ first: i, last: i, slices: [i], poc: s.poc, frameNum: frames.length });
     }
     return frames;
   }
