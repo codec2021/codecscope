@@ -234,3 +234,87 @@ td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
 .splitter-row { cursor: row-resize; }
 
 .hidden { display: none !important; }
+
+/* 移动端导航栏：桌面端默认隐藏，移动端显示 */
+.mobile-nav { display: none; }
+
+/* ---------- 移动端适配（≤768px） ---------- */
+@media (max-width: 768px) {
+  html, body { height: 100%; }
+
+  .topbar { flex-wrap: wrap; gap: 6px; padding: 8px 10px; }
+  .topbar h1 { font-size: 15px; }
+  .header-actions { flex-wrap: wrap; gap: 6px; width: 100%; }
+  .header-actions .btn { padding: 6px 12px; font-size: 13px; }
+  .header-actions .file-name { max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 三栏 → 上下堆叠，通过底部导航切换视图 */
+  .main-area {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .nal-panel, .syntax-panel { border: none; }
+  .nal-panel { display: flex; flex-direction: column; height: 100%; }
+  .syntax-panel { display: flex; flex-direction: column; height: 100%; }
+
+  .bottom-panels { display: none; }
+
+  /* 默认视图：NAL */
+  body[data-mobile-view="nal"] .nal-panel { display: flex; }
+  body[data-mobile-view="nal"] .syntax-panel { display: none; }
+  body[data-mobile-view="nal"] .bottom-panels { display: none; }
+
+  body[data-mobile-view="syntax"] .nal-panel { display: none; }
+  body[data-mobile-view="syntax"] .syntax-panel { display: flex; }
+  body[data-mobile-view="syntax"] .bottom-panels { display: none; }
+
+  body[data-mobile-view="hdr"] .nal-panel { display: none; }
+  body[data-mobile-view="hdr"] .syntax-panel { display: none; }
+  body[data-mobile-view="hdr"] .bottom-panels { display: block; flex: 1 1 auto; }
+
+  .splitter { display: none; }
+
+  body[data-mobile-view="hdr"] .bottom-panels {
+    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  body[data-mobile-view="hdr"] .hdr-panel,
+  body[data-mobile-view="hdr"] .warning-panel { border: none; display: flex; flex-direction: column; }
+
+  /* 时间轴横向滚动占满 */
+  .timeline-panel .timeline-wrap { padding: 4px 6px 8px; }
+
+  /* 预览画面移动端全宽 */
+  .preview-wrap { flex-direction: column; padding: 8px 10px 16px; }
+  .preview-canvas { max-width: 100%; max-height: 45vh; }
+  .preview-side { max-width: 100%; min-width: 0; width: 100%; }
+
+  /* NAL 列表列宽收紧 */
+  .c-offset { flex: 0 0 72px; }
+  .c-length { flex: 0 0 56px; padding-right: 8px; }
+  .c-type { flex: 0 0 96px; }
+  .c-frame { flex: 0 0 40px; padding-right: 8px; }
+
+  /* 底部移动端导航栏 */
+  .mobile-nav {
+    display: flex;
+    flex: 0 0 auto;
+    border-top: 1px solid var(--border);
+    background: var(--header-bg);
+  }
+  .mobile-nav button {
+    flex: 1 1 0;
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    border-right: 1px solid var(--border);
+    padding: 10px 4px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .mobile-nav button:last-child { border-right: none; }
+  .mobile-nav button.active { color: #fff; background: var(--accent-soft); }
+}

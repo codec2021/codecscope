@@ -1158,10 +1158,27 @@ timeline.addEventListener("click", function (e) {
   }
 
   // ---------- 启动 ----------
+  function initMobileNav() {
+    var nav = document.getElementById("mobileNav");
+    if (!nav) return;
+    function setView(name) {
+      var btns = nav.querySelectorAll("button");
+      for (var i = 0; i < btns.length; i++) btns[i].classList.toggle("active", btns[i].dataset.view === name);
+      document.body.setAttribute("data-mobile-view", name);
+    }
+    nav.addEventListener("click", function (e) {
+      var btn = e.target.closest("button");
+      if (btn && btn.dataset.view) setView(btn.dataset.view);
+    });
+    setView("nal");
+    return setView;
+  }
+
   function boot() {
     makeSplitterCol("splitMainCol", mainArea);
     makeSplitterCol("splitBottomCol", bottomPanels);
     makeSplitterRow("splitMainRow", bottomPanels);
+    initMobileNav();
     if (typeof createHevcModule !== "function") {
       setStatus("Error: WASM module (hevc.js) not found");
       return;
