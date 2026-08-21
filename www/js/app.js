@@ -669,7 +669,10 @@ timeline.addEventListener("click", function (e) {
     params: [],
     feedFrame: -1,
     frames: {},
-    curFrame: -1
+    curFrame: -1,
+    displayOrder: true,   // true=显示顺序(POC), false=解码顺序
+    order: null,          // 显示顺序的帧索引(fi)列表
+    orderPos: -1          // 显示游标（order 数组下标）
   };
 
   function frameIndexOfSlice(sliceIdx) {
@@ -691,6 +694,32 @@ timeline.addEventListener("click", function (e) {
       }
     }
     return -1;
+  }
+
+  function frameIsKey(fi) {
+    var frames = timeline._frames;
+    var sl = frames[fi].slices;
+    for (var k = 0; k < sl.length; k++) {
+      if (isKeyNal(currentData.nalus[timeline._slices[sl[k]].index].type)) return true;
+    }
+    return false;
+  }
+
+  function buildPlayOrder() {
+    // 构建显示顺序（按 POC）的帧索引列表；跨 GOP 用 GOP 编号保持全局唯一
+    var frames = timeline._frames;
+    if (!frames || frames.length === 0) { play.order = []; return; }
+    var minPoc = Infinity;
+    for (var i = 0; i < frames.length; i++) if (frames[i].poc < minPoc) minPoc = frames[i].poc;
+    var entries = [];
+    var gop = 0;
+    for (var f = 0; f < frames.length; f++) {
+      if (f > 0 && frameIsKey(f)) gop++;
+      // 显示键 = GOP 编号 * 大基数 + (POC - minPoc)，保证 GOP 间顺序、GOP 内按 POC
+      entries.push({ fi: f, key: gop * 100000 + (frames[f].poc - minPoc) });
+    }
+    entries.sort(function (a, b) { return a.key - b.key; });
+    play.order = entries.map(function (e) { return e.fi; });
   }
 
   function makeAuData(nalIdxs) {
@@ -815,9 +844,18 @@ timeline.addEventListener("click", function (e) {
       if (ii >= 0) fi = ii;
     }
     if (findKeyFrame(fi) < 0) { previewMsg.textContent = "Key frame not found"; return; }
+    buildPlayOrder();
     initPlayDecoder(function () {
       play.active = true;
-      play.curFrame = fi;
+      play.feedFrame = -1;
+      if (play.displayOrder) {
+        // 显示顺序模式：从选中帧在 order 里的位置开始，按 POC 顺序显示
+        play.orderPos = 0;
+        for (var p = 0; p < play.order.length; p++) { if (play.order[p] === fi) { play.orderPos = p; break; } }
+        play.curFrame = fi;
+      } else {
+        play.curFrame = fi;
+      }
       previewPlayBtn.textContent = "⏸ Pause";
       previewMsg.textContent = "";
       feedFrames(fi);
@@ -828,10 +866,18 @@ timeline.addEventListener("click", function (e) {
       }
       play.timer = setInterval(function () {
         if (!play.active) return;
-        if (play.curFrame >= frames.length - 1) { stopPlayback(); return; }
-        showPlayFrame(play.curFrame);
-        play.curFrame++;
-        feedFrames(Math.min(play.curFrame + 10, frames.length - 1));
+        if (play.displayOrder) {
+          if (play.orderPos >= play.order.length) { stopPlayback(); return; }
+          var target = play.order[play.orderPos];
+          if (play.frames[target]) { showPlayFrame(target); play.orderPos++; }
+          // 解码始终按解码顺序领先：喂到 target 之后若干帧
+          feedFrames(Math.min(target + 16, frames.length - 1));
+        } else {
+          if (play.curFrame >= frames.length - 1) { stopPlayback(); return; }
+          showPlayFrame(play.curFrame);
+          play.curFrame++;
+          feedFrames(Math.min(play.curFrame + 10, frames.length - 1));
+        }
       }, iv);
     });
   }
@@ -1080,6 +1126,13 @@ timeline.addEventListener("click", function (e) {
   previewPlayBtn.addEventListener("click", function () { startPlayback(); });
   previewPrevBtn.addEventListener("click", function () { stepFrame(-1); });
   previewNextBtn.addEventListener("click", function () { stepFrame(1); });
+  var previewOrderBtn = document.getElementById("previewOrderBtn");
+  previewOrderBtn.addEventListener("click", function () {
+    if (play.active) stopPlayback();
+    play.displayOrder = !play.displayOrder;
+    previewOrderBtn.textContent = play.displayOrder ? "显示顺序" : "解码顺序";
+    previewOrderBtn.title = play.displayOrder ? "Play in display order (POC)" : "Play in decode order";
+  });
 
   function stepFrame(delta) {
     if (play.active) stopPlayback();
