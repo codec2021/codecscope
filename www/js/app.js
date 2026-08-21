@@ -800,6 +800,7 @@ timeline.addEventListener("click", function (e) {
       var sps = stripEP(nalData(currentData.nalus[si]));
       var b1 = sps[3];
       var space = (b1 >> 6) & 3;
+      var tier = (b1 >> 5) & 1;
       var profileIdc = b1 & 0x1F;
       var compat = (sps[4] << 24) | (sps[5] << 16) | (sps[6] << 8) | sps[7];
       var level = sps[14];
@@ -807,7 +808,19 @@ timeline.addEventListener("click", function (e) {
       // codec string 里 compat/constraint 是 bit-reversed（ISO 14496-15）
       function rev32(v) { var r = 0; for (var i = 0; i < 32; i++) { r = (r << 1) | (v & 1); v >>>= 1; } return r >>> 0; }
       var compatHex = rev32(compat).toString(16).toUpperCase();
-      return "hev1." + spaceChar + profileIdc + "." + compatHex + ".L" + level + ".B0";
+      // constraint indicator flags：48 bits（SPS 偏移 8..13），整体 bit-reverse 后转 hex（去前导 0）
+      var constraintHex = "";
+      var cstarted = false;
+      for (var cb = 47; cb >= 0; cb--) {
+        var byteIdx = 8 + (cb >> 3);
+        var bitIdx = cb & 7;
+        var bit = (sps[byteIdx] >> bitIdx) & 1;
+        if (bit || cstarted) { cstarted = true; constraintHex += bit; }
+      }
+      if (constraintHex === "") constraintHex = "0";
+      constraintHex = parseInt(constraintHex, 2).toString(16).toUpperCase();
+      var tierChar = tier ? "H" : "L";
+      return "hev1." + spaceChar + profileIdc + "." + compatHex + "." + tierChar + level + "." + constraintHex;
     }
     return null;
   }
