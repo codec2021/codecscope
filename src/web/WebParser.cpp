@@ -443,6 +443,8 @@ namespace web
       out += std::to_string(m_nalus[i].sliceQp);
       out += ",\"slicePoc\":";
       out += std::to_string(m_nalus[i].slicePoc);
+      out += ",\"firstSlice\":";
+      out += std::to_string(m_nalus[i].firstSlice);
       out += ",\"frameNum\":";
       out += std::to_string(m_nalus[i].frameNum);
       out += "}";

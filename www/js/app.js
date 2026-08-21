@@ -449,10 +449,18 @@
 
   function groupTimelineFrames(slices) {
     var frames = [];
+    var hasFirstSlice = slices.length > 0 && slices[0].firstSlice !== undefined;
     for (var i = 0; i < slices.length; i++) {
       var s = slices[i];
       var prev = frames.length > 0 ? frames[frames.length - 1] : null;
-      if (prev && prev.poc >= 0 && prev.poc === s.poc && prev.last === i - 1) {
+      var sameFrame = false;
+      if (hasFirstSlice) {
+        // first_slice_segment_in_pic_flag=1 表示新帧开始，0 表示同帧后续 slice
+        sameFrame = prev !== null && s.firstSlice === 0;
+      } else {
+        sameFrame = prev !== null && prev.poc >= 0 && prev.poc === s.poc && prev.last === i - 1;
+      }
+      if (sameFrame) {
         prev.last = i;
         prev.slices.push(i);
         continue;
@@ -467,7 +475,7 @@
     var slices = [];
     currentData.nalus.forEach(function (n, i) {
       if (n.sliceType >= 0) {
-        slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum });
+        slices.push({ index: i, type: n.sliceType, poc: n.slicePoc, frame: n.frameNum, firstSlice: n.firstSlice });
       }
     });
     if (slices.length === 0) return;
@@ -581,11 +589,27 @@
     }
     return timeline._tip;
   }
+  function sliceAtX(x) {
+    var xs = timeline._xs, barW = timeline._barW;
+    if (!xs || xs.length === 0) return -1;
+    // 二分查找最后一个 xs[i] <= x 的 i（落在色块内）
+    var lo = 0, hi = xs.length - 1, ans = -1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (xs[mid] <= x) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    if (ans >= 0 && ans < xs.length) {
+      // 若 x 落在帧间空隙或超过色块右边界，则不属于任何 slice
+      if (x > xs[ans] + barW) return -1;
+      return ans;
+    }
+    return -1;
+  }
   function timelineMove(e) {
     if (!timeline._slices) return;
     var rect = timeline.getBoundingClientRect();
     var x = e.clientX - rect.left;
-    var idx = Math.floor(x / timeline._barW);
+    var idx = sliceAtX(x);
     if (idx < 0 || idx >= timeline._slices.length) { timelineTip().style.display = "none"; return; }
     var s = timeline._slices[idx];
     var t = { 2: "I", 0: "P", 1: "B" }[s.type] || "?";
@@ -599,7 +623,7 @@ timeline.addEventListener("click", function (e) {
      if (!timeline._slices || !timeline._frames) return;
      var rect = timeline.getBoundingClientRect();
      var x = e.clientX - rect.left;
-     var idx = Math.floor(x / timeline._barW);
+     var idx = sliceAtX(x);
      if (idx >= 0 && idx < timeline._slices.length) {
        var fi = frameIndexOfSlice(idx);
        var si = fi >= 0 ? timeline._frames[fi].first : idx;
