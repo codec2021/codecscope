@@ -582,6 +582,9 @@
     timeline._barW = barW;
     timeline._frameGap = frameGap;
     timeline._labelH = labelH;
+    var nalToSlice = {};
+    for (var mi = 0; mi < slices.length; mi++) nalToSlice[slices[mi].index] = mi;
+    timeline._nalToSlice = nalToSlice;
 
     var legend = document.getElementById("timelineLegend");
     legend.innerHTML =
@@ -732,6 +735,7 @@ timeline.addEventListener("click", function (e) {
       for (var k = 0; k < nalIdxs.length; k++) {
         var nal = currentData.nalus[nalIdxs[k]];
         var off = nal.offset, len = nal.length;
+        if (off < 0 || off + len > fileBytes.length) continue;
         var startLen = 3;
         if (fileBytes[off] === 0 && fileBytes[off + 1] === 0 && fileBytes[off + 2] === 0 && fileBytes[off + 3] === 1) startLen = 4;
         else if (fileBytes[off] === 0 && fileBytes[off + 1] === 0 && fileBytes[off + 2] === 1) startLen = 3;
@@ -756,6 +760,7 @@ timeline.addEventListener("click", function (e) {
     var o = 0;
     for (var k2 = 0; k2 < nalIdxs.length; k2++) {
       var nal = currentData.nalus[nalIdxs[k2]];
+      if (nal.offset < 0 || nal.offset + nal.length > fileBytes.length) { o += nal.length; continue; }
       data.set(fileBytes.subarray(nal.offset, nal.offset + nal.length), o);
       o += nal.length;
     }
@@ -775,12 +780,18 @@ timeline.addEventListener("click", function (e) {
         nalIdxs.push(nalIdx);
         if (isKeyNal(currentData.nalus[nalIdx].type)) isKey = true;
       }
-      play.decoder.decode(new EncodedVideoChunk({
-        type: isKey ? "key" : "delta",
-        timestamp: fi,
-        data: makeAuData(isKey && !currentDescription ? play.params.concat(nalIdxs) : nalIdxs)
-      }));
-      play.feedFrame = fi;
+      try {
+        play.decoder.decode(new EncodedVideoChunk({
+          type: isKey ? "key" : "delta",
+          timestamp: fi,
+          data: makeAuData(isKey && !currentDescription ? play.params.concat(nalIdxs) : nalIdxs)
+        }));
+        play.feedFrame = fi;
+      } catch (err) {
+        previewMsg.textContent = "Decode error: " + err.message;
+        stopPlayback();
+        return;
+      }
     }
   }
 
@@ -929,6 +940,7 @@ timeline.addEventListener("click", function (e) {
       var si = findNalByType(7);
       if (si < 0) return null;
       var sps = stripEP(nalData(currentData.nalus[si]));
+      if (sps.length < 4) return null;
       function hx(v) { var s = v.toString(16); return (s.length < 2 ? "0" : "") + s; }
       return (currentDescription ? "avc1" : "avc3") + "." + hx(sps[1]) + hx(sps[2]) + hx(sps[3]);
     }
@@ -936,6 +948,7 @@ timeline.addEventListener("click", function (e) {
       var si = findNalByType(33);
       if (si < 0) return null;
       var sps = stripEP(nalData(currentData.nalus[si]));
+      if (sps.length < 15) return null;
       var b1 = sps[3];
       var space = (b1 >> 6) & 3;
       var tier = (b1 >> 5) & 1;
@@ -1013,11 +1026,18 @@ timeline.addEventListener("click", function (e) {
 
     initPlayDecoder(function () {
       feedFrames(fi);
+      var waited = 0;
       var check = setInterval(function () {
         var frame = play.frames[fi];
         if (frame) {
           clearInterval(check);
           showPlayFrame(fi);
+          return;
+        }
+        waited += 10;
+        if (waited > 10000) {
+          clearInterval(check);
+          if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
         }
       }, 10);
     });
@@ -1086,10 +1106,8 @@ timeline.addEventListener("click", function (e) {
 
   function syncSelectionFromNal(nalIndex, scrollTo) {
     if (!currentData || !timeline._slices) { selectNal(nalIndex, scrollTo); return; }
-    var si = -1;
-    for (var i = 0; i < timeline._slices.length; i++) {
-      if (timeline._slices[i].index === nalIndex) { si = i; break; }
-    }
+    var si = timeline._nalToSlice ? timeline._nalToSlice[nalIndex] : -1;
+    if (si === undefined) si = -1;
     if (si < 0) { selectNal(nalIndex, scrollTo); return; }
     if (selectedSlice !== si) {
       selectedSlice = si;
