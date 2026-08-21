@@ -641,7 +641,9 @@
     if (idx < 0 || idx >= timeline._slices.length) { timelineTip().style.display = "none"; return; }
     var s = timeline._slices[idx];
     var t = { 2: "I", 0: "P", 1: "B" }[s.type] || "?";
-    timelineTip().textContent = "Frame " + s.frame + "  [" + t + "]\nPOC " + s.poc;
+    var fi = frameIndexOfSlice(idx);
+    var frameLabel = fi >= 0 ? fi : "?";
+    timelineTip().textContent = "Frame " + frameLabel + "  [" + t + "]\nPOC " + s.poc;
     timelineTip().style.display = "block";
     timelineTip().style.left = (e.clientX + 12) + "px";
     timelineTip().style.top = (e.clientY + 12) + "px";
