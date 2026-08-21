@@ -171,9 +171,10 @@ body { display: flex; flex-direction: column; }
 .c-offset { flex: 0 0 96px; font-family: "SF Mono", Menlo, Consolas, monospace; }
 .c-length { flex: 0 0 84px; font-family: "SF Mono", Menlo, Consolas, monospace; text-align: right; padding-right: 18px; }
 .c-type { flex: 0 0 150px; font-family: "SF Mono", Menlo, Consolas, monospace; }
+.c-frame { flex: 0 0 64px; font-family: "SF Mono", Menlo, Consolas, monospace; text-align: right; padding-right: 18px; color: #7ec8ff; }
 .c-info { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
 
-.nal-header .c-offset, .nal-header .c-length, .nal-header .c-type, .nal-header .c-info { color: var(--text-dim); }
+.nal-header .c-offset, .nal-header .c-length, .nal-header .c-type, .nal-header .c-frame, .nal-header .c-info { color: var(--text-dim); }
 
 .bottom-panels {
   flex: 0 0 200px; display: grid; grid-template-columns: 320px 5px 1fr;

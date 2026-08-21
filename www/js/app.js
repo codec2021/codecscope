@@ -333,6 +333,29 @@
     updateVisibleRows();
   }
 
+  function annotateFrameIndex() {
+    // 为每个 NAL 计算所属帧号（frameIdx），供 NAL 列表显示
+    // 依据 first_slice_segment_in_pic_flag=1 判定帧边界；无该字段时按 POC 连续分组
+    var nalus = currentData.nalus;
+    var frameIdx = -1;
+    var hasFirstSlice = false;
+    for (var i = 0; i < nalus.length; i++) if (nalus[i].sliceType >= 0) { hasFirstSlice = nalus[i].firstSlice !== undefined; break; }
+    var prevPoc = null;
+    for (var j = 0; j < nalus.length; j++) {
+      var n = nalus[j];
+      if (n.sliceType < 0) { n.frameIdx = -1; continue; }
+      var isNewFrame;
+      if (hasFirstSlice) {
+        isNewFrame = n.firstSlice === 1;
+      } else {
+        isNewFrame = prevPoc === null || prevPoc !== n.slicePoc || n.slicePoc < 0;
+      }
+      if (isNewFrame) { frameIdx++; }
+      n.frameIdx = frameIdx;
+      if (n.slicePoc !== undefined) prevPoc = n.slicePoc;
+    }
+  }
+
   function makeRow(i) {
     var n = currentData.nalus[i];
     var row = document.createElement("div");
@@ -351,6 +374,10 @@
     type.className = "c-type";
     type.textContent = n.typeName;
 
+    var fr = document.createElement("span");
+    fr.className = "c-frame";
+    fr.textContent = (n.frameIdx !== undefined && n.frameIdx >= 0) ? String(n.frameIdx) : "";
+
     var info = document.createElement("span");
     info.className = "c-info";
     info.textContent = n.info;
@@ -359,6 +386,7 @@
     row.appendChild(off);
     row.appendChild(len);
     row.appendChild(type);
+    row.appendChild(fr);
     row.appendChild(info);
     return row;
   }
@@ -1103,6 +1131,7 @@ timeline.addEventListener("click", function (e) {
         currentCodec = result.codec;
         currentData = result.data;
         currentWarnings = result.data.warnings || [];
+        annotateFrameIndex();
 
         codecBadge.textContent = currentCodec.toUpperCase();
         codecBadge.classList.remove("hidden");
@@ -1244,7 +1273,7 @@ timeline.addEventListener("click", function (e) {
       var startH = lower.offsetHeight;
       function move(ev) {
         var dy = ev.clientY - startY;
-        var h = startH + dy;
+        var h = startH - dy; // 向下拖 dy>0 → 下方面板变小，上方面板变大
         h = Math.max(60, Math.min(h, window.innerHeight - 200));
         lower.style.flex = "0 0 " + h + "px";
       }
