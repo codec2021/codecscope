@@ -6,6 +6,8 @@
   var currentCodec = null;     // "hevc" / "avc" / "vvc"
   var currentWarnings = [];
   var fileBytes = null;        // 原始文件字节（用于 hex 视图）
+  var currentDescription = null; // 解码器 description（hvcC/avcC 原始字节，MP4 容器时）
+  var currentNalLengthSize = 4;  // description 存在时的 NAL 长度前缀字节数
   var selectedIndex = -1;
 
   var statusEl = document.getElementById("status");
@@ -134,6 +136,8 @@
     // 从 stsd 提取 codec + SPS/PPS
     var codec = null;
     var paramNals = []; // 参数集 NAL（RBSP，含 VPS/SPS/PPS）
+    var description = null; // 完整 hvcC/avcC 配置记录字节（供解码器）
+    var nalLengthSize = 4;
     var sdEnd = stsd.offset + stsd.size;
     var p = stsd.offset + 16; // 跳过 version+flags(4) + entry_count(4)，到第一个 sample entry
     if (p + 8 <= sdEnd) {
@@ -146,7 +150,9 @@
       if (cfg) {
         var c = cfg.offset + 8; // 配置内容
         var cEnd = cfg.offset + cfg.size;
+        description = d.subarray(c, cEnd);
         if (codec === "avc") {
+          nalLengthSize = 1 + (description[4] & 0x03); // avcC offset 4 低 2 位 lengthSizeMinusOne
           // avcC: version(1)+profile(1)+compat(1)+level(1)+0xFF+0xE1+spslen(2)+sps+numPPS(1)+ppslen(2)+pps
           var spsLen = readU16(d, c + 6);
           paramNals.push(d.subarray(c + 8, c + 8 + spsLen));
@@ -159,6 +165,7 @@
             np += 2 + ppsLen;
           }
         } else if (codec === "hevc" || codec === "vvc") {
+          nalLengthSize = 1 + (description[21] & 0x03); // hvcC offset 21 低 2 位 lengthSizeMinusOne
           // hvcC/vvcC: 23-byte header（numOfArrays 在 offset 22），然后 arrays
           var na = d[c + 22];
           var np2 = c + 23;
@@ -262,7 +269,7 @@
       out.set(nalList[q2], w);
       w += nalList[q2].length;
     }
-    return { codec: codec, annexb: out };
+    return { codec: codec, annexb: out, description: description, nalLengthSize: nalLengthSize };
   }
 
   // ---------- WASM 封装 ----------
@@ -635,6 +642,31 @@ timeline.addEventListener("click", function (e) {
   }
 
   function makeAuData(nalIdxs) {
+    if (currentDescription) {
+      // hevc/avc 格式：length-prefixed NAL（description 存在时解码器要求此格式）
+      var total = 0;
+      var bodies = [];
+      for (var k = 0; k < nalIdxs.length; k++) {
+        var nal = currentData.nalus[nalIdxs[k]];
+        var off = nal.offset, len = nal.length;
+        var startLen = 3;
+        if (fileBytes[off] === 0 && fileBytes[off + 1] === 0 && fileBytes[off + 2] === 0 && fileBytes[off + 3] === 1) startLen = 4;
+        else if (fileBytes[off] === 0 && fileBytes[off + 1] === 0 && fileBytes[off + 2] === 1) startLen = 3;
+        else startLen = 0;
+        var body = fileBytes.subarray(off + startLen, off + len);
+        bodies.push(body);
+        total += currentNalLengthSize + body.length;
+      }
+      var data = new Uint8Array(total);
+      var o = 0;
+      for (var k2 = 0; k2 < bodies.length; k2++) {
+        var blen = bodies[k2].length;
+        for (var s = currentNalLengthSize - 1; s >= 0; s--) data[o++] = (blen >> (s * 8)) & 0xFF;
+        data.set(bodies[k2], o);
+        o += blen;
+      }
+      return data;
+    }
     var len = 0;
     for (var k = 0; k < nalIdxs.length; k++) len += currentData.nalus[nalIdxs[k]].length;
     var data = new Uint8Array(len);
@@ -663,7 +695,7 @@ timeline.addEventListener("click", function (e) {
       play.decoder.decode(new EncodedVideoChunk({
         type: isKey ? "key" : "delta",
         timestamp: fi,
-        data: makeAuData(isKey ? play.params.concat(nalIdxs) : nalIdxs)
+        data: makeAuData(isKey && !currentDescription ? play.params.concat(nalIdxs) : nalIdxs)
       }));
       play.feedFrame = fi;
     }
@@ -672,7 +704,9 @@ timeline.addEventListener("click", function (e) {
   function initPlayDecoder(done) {
     var cs = codecString();
     if (!cs) { previewMsg.textContent = "Unable to determine codec string"; return; }
-    VideoDecoder.isConfigSupported({ codec: cs }).then(function (support) {
+    var probeCfg = { codec: cs };
+    if (currentDescription) probeCfg.description = currentDescription;
+    VideoDecoder.isConfigSupported(probeCfg).then(function (support) {
       if (!support.supported) {
         previewMsg.textContent = "Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : "");
         return;
@@ -692,7 +726,9 @@ timeline.addEventListener("click", function (e) {
           stopPlayback();
         }
       });
-      play.decoder.configure({ codec: cs, optimizeForLatency: true });
+      var conf = { codec: cs, optimizeForLatency: true };
+      if (currentDescription) conf.description = currentDescription;
+      play.decoder.configure(conf);
       done();
     }).catch(function (err) {
       previewMsg.textContent = "Config error: " + err.message;
@@ -792,7 +828,7 @@ timeline.addEventListener("click", function (e) {
       if (si < 0) return null;
       var sps = stripEP(nalData(currentData.nalus[si]));
       function hx(v) { var s = v.toString(16); return (s.length < 2 ? "0" : "") + s; }
-      return "avc3." + hx(sps[1]) + hx(sps[2]) + hx(sps[3]);
+      return (currentDescription ? "avc1" : "avc3") + "." + hx(sps[1]) + hx(sps[2]) + hx(sps[3]);
     }
     if (currentCodec === "hevc") {
       var si = findNalByType(33);
@@ -820,7 +856,7 @@ timeline.addEventListener("click", function (e) {
       if (constraintHex === "") constraintHex = "0";
       constraintHex = parseInt(constraintHex, 2).toString(16).toUpperCase();
       var tierChar = tier ? "H" : "L";
-      return "hev1." + spaceChar + profileIdc + "." + compatHex + "." + tierChar + level + "." + constraintHex;
+      return (currentDescription ? "hvc1" : "hev1") + "." + spaceChar + profileIdc + "." + compatHex + "." + tierChar + level + "." + constraintHex;
     }
     return null;
   }
@@ -1030,9 +1066,13 @@ timeline.addEventListener("click", function (e) {
             return;
           }
           fileBytes = demuxed.annexb;
+          currentDescription = demuxed.description || null;
+          currentNalLengthSize = demuxed.nalLengthSize || 4;
           srcNote = " (MP4 demuxed)";
         } else {
           fileBytes = rawBytes;
+          currentDescription = null;
+          currentNalLengthSize = 4;
         }
         var result = parseBuffer(fileBytes);
         var t1 = performance.now();
@@ -1078,6 +1118,8 @@ timeline.addEventListener("click", function (e) {
     currentCodec = null;
     currentWarnings = [];
     fileBytes = null;
+    currentDescription = null;
+    currentNalLengthSize = 4;
     selectedIndex = -1;
 
     codecBadge.classList.add("hidden");
