@@ -208,9 +208,98 @@
     return { codec: codec, annexb: out, description: description, nalLengthSize: nalLengthSize };
   }
 
+  function isHeic(d) {
+    if (d.length < 12 || fourCC(d, 4) !== "ftyp") return false;
+    // 检查 ftyp 的 compatible brands 里是否有 heic/heix/mif1
+    var end = boxSize(d, 0);
+    var b = 16; // 跳过 size(4)+ftyp(4)+major_brand(4)+minor(4)
+    while (b + 4 <= end && b + 4 <= d.length) {
+      var cc = fourCC(d, b);
+      if (cc === "heic" || cc === "heix" || cc === "mif1" || cc === "hevc" || cc === "hevm" || cc === "hevs" || cc === "avif") return true;
+      b += 4;
+    }
+    return false;
+  }
+
+  function parseHeic(d) {
+    // 解析 HEIC/HEIF 单帧图像：meta → iprp/ipco 里的 ispe(分辨率) + hvcC(HEVC 配置)
+    var meta = findBox(d, 0, d.length, "meta");
+    if (!meta) return null;
+    // meta 是 FullBox：content 从 offset+12（size4+type4+version/flags4）
+    var metaContent = meta.offset + 12;
+    var metaEnd = meta.offset + meta.size;
+
+    // 在 meta 内找 iprp（item properties，普通 Box）
+    var iprp = findBox(d, metaContent, metaEnd, "iprp");
+    if (!iprp) return null;
+    // iprp 是普通 Box：content 从 offset+8
+    var iprpContent = iprp.offset + 8;
+    var iprpEnd = iprp.offset + iprp.size;
+
+    // 在 iprp 内找 ipco（property container，普通 Box）
+    var ipco = findBox(d, iprpContent, iprpEnd, "ipco");
+    if (!ipco) return null;
+    var ipcoContent = ipco.offset + 8;
+    var ipcoEnd = ipco.offset + ipco.size;
+
+    // 找 ispe（分辨率，FullBox）和 hvcC（HEVC 配置，普通 Box）
+    var ispe = findBox(d, ipcoContent, ipcoEnd, "ispe");
+    var hvcc = findBox(d, ipcoContent, ipcoEnd, "hvcC");
+    if (!hvcc) return null;
+
+    // 从 hvcC 提取 VPS/SPS/PPS（HEVCDecoderConfigurationRecord）
+    var c = hvcc.offset + 8; // 跳过 size(4)+type(4)，到 configurationVersion
+    var description = d.subarray(c, hvcc.offset + hvcc.size);
+    var paramNals = [];
+    var na = d[c + 22]; // numOfArrays
+    var np = c + 23;
+    for (var q2 = 0; q2 < na; q2++) {
+      var ntype = d[np] & 0x3F;
+      var numNalus = readU16(d, np + 1);
+      np += 3;
+      for (var q3 = 0; q3 < numNalus; q3++) {
+        var nlen = readU16(d, np);
+        if (ntype === 32 || ntype === 33 || ntype === 34)
+          paramNals.push(d.subarray(np + 2, np + 2 + nlen));
+        np += 2 + nlen;
+      }
+    }
+
+    // 组装 annexb（仅参数集，图像数据在 mdat 里，这里不取）
+    var totalSize = 0;
+    for (var q4 = 0; q4 < paramNals.length; q4++) totalSize += paramNals[q4].length + 4;
+    var out = new Uint8Array(totalSize);
+    var w = 0;
+    for (var q5 = 0; q5 < paramNals.length; q5++) {
+      out[w] = 0; out[w + 1] = 0; out[w + 2] = 0; out[w + 3] = 1;
+      w += 4;
+      out.set(paramNals[q5], w);
+      w += paramNals[q5].length;
+    }
+
+    var picWidth = 0, picHeight = 0;
+    if (ispe) {
+      // ispe FullBox: version/flags(4) + width(4) + height(4)
+      picWidth = readU32(d, ispe.offset + 12);
+      picHeight = readU32(d, ispe.offset + 16);
+    }
+
+    return {
+      codec: "hevc",
+      annexb: out,
+      description: description,
+      nalLengthSize: 1 + (d[c + 21] & 0x03),
+      picWidth: picWidth,
+      picHeight: picHeight,
+      isImage: true
+    };
+  }
+
   window.H26xDemux = {
     isMp4: isMp4,
     demuxMp4: demuxMp4,
+    isHeic: isHeic,
+    parseHeic: parseHeic,
     nalToAnnexB: nalToAnnexB
   };
 })();

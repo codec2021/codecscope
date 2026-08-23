@@ -1068,7 +1068,22 @@ timeline.addEventListener("click", function (e) {
       try {
         var t0 = performance.now();
         var srcNote = "";
-        if (H26xDemux.isMp4(rawBytes)) {
+        var isImage = false;
+        var imageW = 0, imageH = 0;
+        if (H26xDemux.isHeic(rawBytes)) {
+          var heic = H26xDemux.parseHeic(rawBytes);
+          if (!heic || !heic.annexb.length) {
+            setStatus("HEIC parse failed");
+            return;
+          }
+          fileBytes = heic.annexb;
+          currentDescription = heic.description || null;
+          currentNalLengthSize = heic.nalLengthSize || 4;
+          isImage = true;
+          imageW = heic.picWidth || 0;
+          imageH = heic.picHeight || 0;
+          srcNote = " (HEIC image)";
+        } else if (H26xDemux.isMp4(rawBytes)) {
           var demuxed = H26xDemux.demuxMp4(rawBytes);
           if (!demuxed || !demuxed.annexb.length) {
             setStatus("MP4 demux failed: no video track found");
@@ -1088,6 +1103,14 @@ timeline.addEventListener("click", function (e) {
         currentCodec = result.codec;
         currentData = result.data;
         currentWarnings = result.data.warnings || [];
+        if (isImage) {
+          currentData.isImage = true;
+          if (imageW && imageH) {
+            currentData.hdr = currentData.hdr || {};
+            currentData.hdr.picWidth = imageW;
+            currentData.hdr.picHeight = imageH;
+          }
+        }
         computeFrames();
 
         var si = result.data.streamInfo;
