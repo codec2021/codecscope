@@ -8,6 +8,7 @@
   var fileBytes = null;        // 原始文件字节（用于 hex 视图）
   var currentDescription = null; // 解码器 description（hvcC/avcC 原始字节，MP4 容器时）
   var currentNalLengthSize = 4;  // description 存在时的 NAL 长度前缀字节数
+  var currentContainerInfo = null; // MP4 容器级信息（General/Video/Audio/Other）
   var selectedIndex = -1;
 
   var statusEl = document.getElementById("status");
@@ -128,51 +129,81 @@
     if (currentCodec === "vvc") return "VVC (Versatile Video Coding) / H.266";
     return "Unknown";
   }
-  function fmtBitrate(bytes) {
-    if (!bytes) return null;
-    var si = currentData.streamInfo;
-    if (si.fps > 0) {
-      var kbps = (bytes * 8 * si.fps) / 1000;
-      return kbps.toFixed(0) + " kb/s";
-    }
-    return null;
+  function codecShortName() {
+    if (currentCodec === "avc") return "AVC";
+    if (currentCodec === "hevc") return "HEVC";
+    if (currentCodec === "vvc") return "VVC";
+    return "?";
   }
   function fmtSize(bytes) {
-    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + " MiB";
+    if (bytes == null) return "?";
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MiB";
     if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KiB";
     return bytes + " B";
+  }
+  function fmtDuration(seconds) {
+    if (seconds == null) return "?";
+    var ms = Math.round(seconds * 1000);
+    var h = Math.floor(ms / 3600000);
+    var m = Math.floor((ms % 3600000) / 60000);
+    var s = Math.floor((ms % 60000) / 1000);
+    var mm = ms % 1000;
+    var out = "";
+    if (h > 0) out += h + " 时 ";
+    if (m > 0 || h > 0) out += m + " 分 ";
+    out += s + " 秒 " + mm + " 毫秒";
+    return out;
+  }
+  function fmtBitrate(bitsPerSec) {
+    if (bitsPerSec == null) return "?";
+    if (bitsPerSec >= 1000000) return (bitsPerSec / 1000000).toFixed(1) + " Mb/s";
+    return (bitsPerSec / 1000).toFixed(0) + " kb/s";
   }
   function buildMediaInfoData() {
     var si = currentData.streamInfo;
     var hdr = currentData.hdr || {};
+    var ci = currentContainerInfo;
     var srcFile = fileNameEl.textContent;
-    // 从文件名提取原始文件名（去掉大小后缀）
     var fname = srcFile;
     var m = /^(.*?) \(([\d.]+) MB\)$/.exec(srcFile);
     if (m) fname = m[1];
-    var fileSizeBytes = m ? parseFloat(m[2]) * 1048576 : null;
 
-    var general = {
-      n: "General",
-      c: [
-        { n: "Complete name: " + fname },
-        { n: "Format: " + codecFullName() },
-        { n: "File size: " + (fileSizeBytes != null ? fmtSize(fileSizeBytes) : "?") }
-      ]
-    };
+    // ---- General ----
+    var generalChildren = [{ n: "Complete name: " + fname }];
+    if (ci && ci.isContainer) {
+      generalChildren.push({ n: "Format: " + ci.format });
+      generalChildren.push({ n: "Format profile: " + ci.formatProfile });
+      generalChildren.push({ n: "File size: " + fmtSize(ci.fileSize) });
+      generalChildren.push({ n: "Duration: " + fmtDuration(ci.duration) });
+      generalChildren.push({ n: "Overall bit rate: " + fmtBitrate(ci.overallBitrate) });
+      if (ci.creationTime) generalChildren.push({ n: "Encoded date: " + ci.creationTime });
+    } else {
+      generalChildren.push({ n: "Format: " + codecFullName() });
+      generalChildren.push({ n: "File size: " + fmtSize(currentData.totalSize) });
+    }
+    if (si.fps > 0) generalChildren.push({ n: "Frame rate: " + si.fps + " FPS" });
+    var general = { n: "General", c: generalChildren };
 
+    // ---- Video ----
+    var vTrack = ci ? ci.tracks.find(function (t) { return t.handler === "vide"; }) : null;
     var videoChildren = [
-      { n: "Format: " + codecFullName() },
-      { n: "Format profile: " + si.profile + (si.tier ? " (" + si.tier + " tier)" : "") },
-      { n: "Level: " + si.level }
+      { n: "Format: " + codecShortName() },
+      { n: "Format/Info: " + codecFullName() }
     ];
-    if (hdr.picWidth) videoChildren.push({ n: "Width: " + hdr.picWidth + " pixels" });
-    if (hdr.picHeight) videoChildren.push({ n: "Height: " + hdr.picHeight + " pixels" });
-    videoChildren.push({ n: "Display aspect ratio: " + (hdr.picWidth && hdr.picHeight ? (hdr.picWidth / hdr.picHeight).toFixed(3) : "?") });
+    videoChildren.push({ n: "Format profile: " + si.profile + "@L" + si.level + "@" + (si.tier || "Main") });
+    if (vTrack && vTrack.codec) videoChildren.push({ n: "Codec ID: " + vTrack.codec });
+    if (vTrack && vTrack.seconds) videoChildren.push({ n: "Duration: " + fmtDuration(vTrack.seconds) });
+    if (vTrack && vTrack.bitrate) videoChildren.push({ n: "Bit rate: " + fmtBitrate(vTrack.bitrate) });
+    var vw = (vTrack && vTrack.width) || hdr.picWidth;
+    var vh = (vTrack && vTrack.height) || hdr.picHeight;
+    if (vw) videoChildren.push({ n: "Width: " + vw + " pixels" });
+    if (vh) videoChildren.push({ n: "Height: " + vh + " pixels" });
+    if (vw && vh) videoChildren.push({ n: "Display aspect ratio: " + (vw / vh).toFixed(3) });
     if (si.fps > 0) videoChildren.push({ n: "Frame rate: " + si.fps + " FPS" });
+    videoChildren.push({ n: "Color space: YUV" });
     if (si.chromaFormat !== undefined) videoChildren.push({ n: "Chroma subsampling: " + chromaFormatName(si.chromaFormat) });
     if (si.bitDepth !== undefined) videoChildren.push({ n: "Bit depth: " + si.bitDepth + " bits" });
-    if (hdr.fullRange !== undefined) videoChildren.push({ n: "Range: " + (hdr.fullRange ? "Full" : "Limited") });
+    if (hdr.fullRange !== undefined) videoChildren.push({ n: "Color range: " + (hdr.fullRange ? "Full" : "Limited") });
     if (hdr.colourPrimaries) videoChildren.push({ n: "Color primaries: " + hdr.colourPrimaries });
     if (hdr.transferCharacteristics) videoChildren.push({ n: "Transfer characteristics: " + hdr.transferCharacteristics });
     if (hdr.matrixCoefficients) videoChildren.push({ n: "Matrix coefficients: " + hdr.matrixCoefficients });
@@ -180,8 +211,45 @@
       videoChildren.push({ n: "Maximum Content Light Level: " + hdr.maxCll + " cd/m2" });
       videoChildren.push({ n: "Maximum Frame-Average Light Level: " + hdr.avgCll + " cd/m2" });
     }
+    if (vTrack && vTrack.streamSize) videoChildren.push({ n: "Stream size: " + fmtSize(vTrack.streamSize) });
     var video = { n: "Video", c: videoChildren };
 
+    // ---- Audio ----
+    var roots = [general, video];
+    if (ci && ci.isContainer) {
+      var aTracks = ci.tracks.filter(function (t) { return t.handler === "soun"; });
+      aTracks.forEach(function (at) {
+        var ac = [
+          { n: "Format: PCM" },
+          { n: "Format settings: Big / Signed" },
+          { n: "Codec ID: " + (at.codec || "twos") }
+        ];
+        if (at.seconds) ac.push({ n: "Duration: " + fmtDuration(at.seconds) });
+        if (at.bitrate) ac.push({ n: "Bit rate mode: Constant" });
+        if (at.bitrate) ac.push({ n: "Bit rate: " + fmtBitrate(at.bitrate) });
+        if (at.channels) ac.push({ n: "Channel(s): " + at.channels + " channels" });
+        if (at.sampleRate) ac.push({ n: "Sampling rate: " + (at.sampleRate / 1000).toFixed(1) + " kHz" });
+        if (at.bitDepth) ac.push({ n: "Bit depth: " + at.bitDepth + " bits" });
+        if (at.streamSize) ac.push({ n: "Stream size: " + fmtSize(at.streamSize) });
+        roots.push({ n: "Audio", c: ac });
+      });
+    }
+
+    // ---- Other（meta 轨道，如 Sony rtmd）----
+    if (ci && ci.isContainer) {
+      var oTracks = ci.tracks.filter(function (t) { return t.handler !== "vide" && t.handler !== "soun"; });
+      oTracks.forEach(function (ot) {
+        var oc = [
+          { n: "Type: meta" },
+          { n: "Codec ID: " + (ot.codec || ot.handler) }
+        ];
+        if (ot.seconds) oc.push({ n: "Duration: " + fmtDuration(ot.seconds) });
+        if (ot.streamSize) oc.push({ n: "Stream size: " + fmtSize(ot.streamSize) });
+        roots.push({ n: "Other", c: oc });
+      });
+    }
+
+    // ---- NAL 统计 ----
     var nalChildren = [
       { n: "NAL units: " + si.nalus },
       { n: "Slices: " + si.slices },
@@ -189,9 +257,9 @@
       { n: "P frames: " + si.p + (si.pPct !== undefined ? " (" + si.pPct + "%)" : "") },
       { n: "B frames: " + si.b + (si.bPct !== undefined ? " (" + si.bPct + "%)" : "") }
     ];
-    var nal = { n: "NAL Statistics", c: nalChildren };
+    roots.push({ n: "NAL Statistics", c: nalChildren });
 
-    var root = { n: "MediaInfo", c: [general, video, nal] };
+    var root = { n: "MediaInfo", c: roots };
     return root;
   }
   function renderMediaInfo() {
@@ -1092,11 +1160,13 @@ timeline.addEventListener("click", function (e) {
           fileBytes = demuxed.annexb;
           currentDescription = demuxed.description || null;
           currentNalLengthSize = demuxed.nalLengthSize || 4;
+          currentContainerInfo = H26xDemux.parseContainerInfo(rawBytes);
           srcNote = " (MP4 demuxed)";
         } else {
           fileBytes = rawBytes;
           currentDescription = null;
           currentNalLengthSize = 4;
+          currentContainerInfo = null;
         }
         var result = parseBuffer(fileBytes);
         var t1 = performance.now();
@@ -1160,6 +1230,7 @@ timeline.addEventListener("click", function (e) {
     fileBytes = null;
     currentDescription = null;
     currentNalLengthSize = 4;
+    currentContainerInfo = null;
     selectedIndex = -1;
     timeline._base = null;
     timeline._baseBarW = null;

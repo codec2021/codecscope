@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  function readU32(d, o) { return (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]; }
+  function readU32(d, o) { return ((d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]) >>> 0; }
   function readU16(d, o) { return (d[o] << 8) | d[o + 1]; }
   function fourCC(d, o) { return String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]); }
   function isMp4(d) { return d.length >= 12 && fourCC(d, 4) === "ftyp"; }
@@ -295,11 +295,171 @@
     };
   }
 
+  function isoDate(secSince1904) {
+    // Mac epoch 1904-01-01 到 Unix epoch 1970-01-01 差 2082844800 秒
+    var unix = secSince1904 - 2082844800;
+    if (unix < 0) return null;
+    return new Date(unix * 1000).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+  }
+  function fmtDuration(seconds) {
+    if (seconds == null) return null;
+    var ms = Math.round(seconds * 1000);
+    var h = Math.floor(ms / 3600000);
+    var m = Math.floor((ms % 3600000) / 60000);
+    var s = Math.floor((ms % 60000) / 1000);
+    var mm = ms % 1000;
+    var out = "";
+    if (h > 0) out += h + " 小时 ";
+    if (m > 0 || h > 0) out += m + " 分 ";
+    out += s + " 秒 " + mm + " 毫秒";
+    return out;
+  }
+  function fmtBitrate(bitsPerSec) {
+    if (bitsPerSec == null) return null;
+    if (bitsPerSec >= 1000000) return (bitsPerSec / 1000000).toFixed(1) + " Mb/s";
+    return (bitsPerSec / 1000).toFixed(0) + " kb/s";
+  }
+  function fmtSize(bytes) {
+    if (bytes == null) return null;
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + " GiB";
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MiB";
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KiB";
+    return bytes + " B";
+  }
+
+  function parseContainerInfo(d) {
+    // 解析 MP4/MOV 容器级信息（General/Video/Audio/Other），类似 MediaInfo
+    var info = { isContainer: false };
+    if (d.length < 12 || fourCC(d, 4) !== "ftyp") return info;
+    info.isContainer = true;
+
+    // ftyp
+    var ftypSize = boxSize(d, 0);
+    var majorBrand = fourCC(d, 8);
+    var brands = [];
+    var b = 16;
+    while (b + 4 <= ftypSize && b + 4 <= d.length) { brands.push(fourCC(d, b)); b += 4; }
+    info.format = majorBrand;
+    info.formatProfile = brands.join("/");
+
+    // moov / mvhd
+    var moov = null, i = 0;
+    while (i + 8 <= d.length) {
+      var s = boxSize(d, i);
+      if (s < 8 || i + s > d.length) break;
+      if (fourCC(d, i + 4) === "moov") { moov = { offset: i + 8, end: i + s }; break; }
+      i += s;
+    }
+    var movieTimescale = 1000, movieDuration = 0;
+    if (moov) {
+      var mvhd = findBox(d, moov.offset, moov.end, "mvhd");
+      if (mvhd) {
+        var ver = d[mvhd.offset + 8];
+        if (ver === 0) {
+          info.creationTime = isoDate(readU32(d, mvhd.offset + 12));
+          movieTimescale = readU32(d, mvhd.offset + 20);
+          movieDuration = readU32(d, mvhd.offset + 24);
+        } else {
+          info.creationTime = isoDate(readU32(d, mvhd.offset + 20));
+          movieTimescale = readU32(d, mvhd.offset + 28);
+          movieDuration = readU32(d, mvhd.offset + 32) * 4294967296 + readU32(d, mvhd.offset + 36);
+        }
+      }
+    }
+    var movieSeconds = movieTimescale > 0 ? movieDuration / movieTimescale : 0;
+    info.duration = movieSeconds;
+    info.fileSize = d.length;
+    info.overallBitrate = movieSeconds > 0 ? (d.length * 8) / movieSeconds : null;
+
+    // 遍历 trak
+    info.tracks = [];
+    if (moov) {
+      var j = moov.offset;
+      while (j + 8 <= moov.end) {
+        var sz = boxSize(d, j);
+        if (sz < 8 || j + sz > moov.end) break;
+        if (fourCC(d, j + 4) === "trak") {
+          var track = parseTrak(d, j + 8, j + sz);
+          if (track) info.tracks.push(track);
+        }
+        j += sz;
+      }
+    }
+    return info;
+  }
+
+  function parseTrak(d, start, end) {
+    var tkhd = findBox(d, start, end, "tkhd");
+    var mdia = findBox(d, start, end, "mdia");
+    if (!mdia) return null;
+    var mdhd = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "mdhd");
+    var hdlr = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "hdlr");
+    var minf = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "minf");
+    var stbl = minf ? findBox(d, minf.offset + 8, minf.offset + minf.size, "stbl") : null;
+    var stsd = stbl ? findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsd") : null;
+
+    var handler = hdlr ? fourCC(d, hdlr.offset + 16) : "?";
+    var timescale = mdhd ? readU32(d, mdhd.offset + 20) : 0;
+    var duration = mdhd ? readU32(d, mdhd.offset + 24) : 0;
+    var track = {
+      id: tkhd ? readU32(d, tkhd.offset + 20) : -1,
+      handler: handler,
+      timescale: timescale,
+      duration: duration,
+      seconds: timescale > 0 ? duration / timescale : 0
+    };
+
+    // stsz 计算流大小（字节）
+    if (stbl) {
+      var stsz = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsz");
+      if (stsz) {
+        var uniform = readU32(d, stsz.offset + 12);
+        var cnt = readU32(d, stsz.offset + 16);
+        var streamBytes = 0;
+        if (uniform > 0) streamBytes = uniform * cnt;
+        else {
+          for (var k = 0; k < cnt; k++) streamBytes += readU32(d, stsz.offset + 20 + k * 4);
+        }
+        track.streamSize = streamBytes;
+        track.bitrate = track.seconds > 0 ? (streamBytes * 8) / track.seconds : null;
+      }
+    }
+
+    // stsd sample entry
+    if (stsd) {
+      var p = stsd.offset + 16;
+      var eEnd = stsd.offset + stsd.size;
+      if (p + 8 <= eEnd) {
+        var esize = readU32(d, p);
+        var fmt = fourCC(d, p + 4);
+        track.codec = fmt;
+        if (fmt === "hvc1" || fmt === "hev1") {
+          track.width = readU16(d, p + 32);
+          track.height = readU16(d, p + 34);
+        } else if (fmt === "avc1" || fmt === "avc3") {
+          track.width = readU16(d, p + 32);
+          track.height = readU16(d, p + 34);
+        } else if (fmt === "twos" || fmt === "sowt" || fmt === "lpcm" || fmt === "in24" || fmt === "in32" || fmt === "fl32" || fmt === "fl64") {
+          // QuickTime AudioSampleEntry（twos/sowt 等）
+          track.channels = readU16(d, p + 24);
+          track.bitDepth = readU16(d, p + 26);
+          track.sampleRate = (readU32(d, p + 32) >>> 16);
+        } else if (fmt === "mp4a") {
+          track.channels = readU16(d, p + 24);
+          track.bitDepth = readU16(d, p + 26);
+          track.sampleRate = (readU32(d, p + 32) >>> 16);
+        }
+      }
+    }
+    return track;
+  }
+
   window.H26xDemux = {
     isMp4: isMp4,
     demuxMp4: demuxMp4,
     isHeic: isHeic,
     parseHeic: parseHeic,
+    parseContainerInfo: parseContainerInfo,
     nalToAnnexB: nalToAnnexB
   };
 })();
