@@ -28,6 +28,7 @@
   var nalCount = document.getElementById("nalCount");
   var syntaxTree = document.getElementById("syntaxTree");
   var syntaxTitle = document.getElementById("syntaxTitle");
+  var mediaInfoView = document.getElementById("mediaInfoView");
   var hexView = document.getElementById("hexView");
   var hdrInfo = document.getElementById("hdrInfo");
   var warningBody = document.getElementById("warningBody");
@@ -115,6 +116,87 @@
     stat("Level", si.level);
     if (si.tier) stat("Tier", si.tier);
     if (si.fps && parseFloat(si.fps) > 0) stat("FPS", si.fps);
+  }
+
+  // ---------- MediaInfo 树状视图 ----------
+  function chromaFormatName(idc) {
+    return ["4:0:0", "4:2:0", "4:2:2", "4:4:4"][idc] || ("idc " + idc);
+  }
+  function codecFullName() {
+    if (currentCodec === "avc") return "AVC (Advanced Video Coding) / H.264";
+    if (currentCodec === "hevc") return "HEVC (High Efficiency Video Coding) / H.265";
+    if (currentCodec === "vvc") return "VVC (Versatile Video Coding) / H.266";
+    return "Unknown";
+  }
+  function fmtBitrate(bytes) {
+    if (!bytes) return null;
+    var si = currentData.streamInfo;
+    if (si.fps > 0) {
+      var kbps = (bytes * 8 * si.fps) / 1000;
+      return kbps.toFixed(0) + " kb/s";
+    }
+    return null;
+  }
+  function fmtSize(bytes) {
+    if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + " MiB";
+    if (bytes >= 1024) return (bytes / 1024).toFixed(1) + " KiB";
+    return bytes + " B";
+  }
+  function buildMediaInfoData() {
+    var si = currentData.streamInfo;
+    var hdr = currentData.hdr || {};
+    var srcFile = fileNameEl.textContent;
+    // 从文件名提取原始文件名（去掉大小后缀）
+    var fname = srcFile;
+    var m = /^(.*?) \(([\d.]+) MB\)$/.exec(srcFile);
+    if (m) fname = m[1];
+    var fileSizeBytes = m ? parseFloat(m[2]) * 1048576 : null;
+
+    var general = {
+      n: "General",
+      c: [
+        { n: "Complete name: " + fname },
+        { n: "Format: " + codecFullName() },
+        { n: "File size: " + (fileSizeBytes != null ? fmtSize(fileSizeBytes) : "?") }
+      ]
+    };
+
+    var videoChildren = [
+      { n: "Format: " + codecFullName() },
+      { n: "Format profile: " + si.profile + (si.tier ? " (" + si.tier + " tier)" : "") },
+      { n: "Level: " + si.level }
+    ];
+    if (hdr.picWidth) videoChildren.push({ n: "Width: " + hdr.picWidth + " pixels" });
+    if (hdr.picHeight) videoChildren.push({ n: "Height: " + hdr.picHeight + " pixels" });
+    videoChildren.push({ n: "Display aspect ratio: " + (hdr.picWidth && hdr.picHeight ? (hdr.picWidth / hdr.picHeight).toFixed(3) : "?") });
+    if (si.fps > 0) videoChildren.push({ n: "Frame rate: " + si.fps + " FPS" });
+    if (si.chromaFormat !== undefined) videoChildren.push({ n: "Chroma subsampling: " + chromaFormatName(si.chromaFormat) });
+    if (si.bitDepth !== undefined) videoChildren.push({ n: "Bit depth: " + si.bitDepth + " bits" });
+    if (hdr.fullRange !== undefined) videoChildren.push({ n: "Range: " + (hdr.fullRange ? "Full" : "Limited") });
+    if (hdr.colourPrimaries) videoChildren.push({ n: "Color primaries: " + hdr.colourPrimaries });
+    if (hdr.transferCharacteristics) videoChildren.push({ n: "Transfer characteristics: " + hdr.transferCharacteristics });
+    if (hdr.matrixCoefficients) videoChildren.push({ n: "Matrix coefficients: " + hdr.matrixCoefficients });
+    if (hdr.hasCll) {
+      videoChildren.push({ n: "Maximum Content Light Level: " + hdr.maxCll + " cd/m2" });
+      videoChildren.push({ n: "Maximum Frame-Average Light Level: " + hdr.avgCll + " cd/m2" });
+    }
+    var video = { n: "Video", c: videoChildren };
+
+    var nalChildren = [
+      { n: "NAL units: " + si.nalus },
+      { n: "Slices: " + si.slices },
+      { n: "I frames: " + si.i + (si.iPct !== undefined ? " (" + si.iPct + "%)" : "") },
+      { n: "P frames: " + si.p + (si.pPct !== undefined ? " (" + si.pPct + "%)" : "") },
+      { n: "B frames: " + si.b + (si.bPct !== undefined ? " (" + si.bPct + "%)" : "") }
+    ];
+    var nal = { n: "NAL Statistics", c: nalChildren };
+
+    var root = { n: "MediaInfo", c: [general, video, nal] };
+    return root;
+  }
+  function renderMediaInfo() {
+    mediaInfoView.innerHTML = "";
+    mediaInfoView.appendChild(buildTree(buildMediaInfoData()));
   }
 
   // 虚拟滚动 NAL 列表
@@ -922,20 +1004,28 @@ timeline.addEventListener("click", function (e) {
   var tabSyntax = document.getElementById("tabSyntax");
   var tabPreview = document.getElementById("tabPreview");
   var tabHex = document.getElementById("tabHex");
+  var tabMediaInfo = document.getElementById("tabMediaInfo");
 
   function showTab(which) {
     tabSyntax.classList.toggle("active", which === "syntax");
     tabPreview.classList.toggle("active", which === "preview");
     tabHex.classList.toggle("active", which === "hex");
+    tabMediaInfo.classList.toggle("active", which === "mediainfo");
     syntaxTree.classList.toggle("hidden", which !== "syntax");
     previewView.classList.toggle("hidden", which !== "preview");
     hexView.classList.toggle("hidden", which !== "hex");
+    mediaInfoView.classList.toggle("hidden", which !== "mediainfo");
     if (which === "preview" && currentData && !previewCanvasTouched) presetPreviewCanvas();
+    if (which === "mediainfo" && currentData && !mediaInfoView.dataset.rendered) {
+      renderMediaInfo();
+      mediaInfoView.dataset.rendered = "1";
+    }
   }
 
   tabSyntax.addEventListener("click", function () { showTab("syntax"); });
   tabPreview.addEventListener("click", function () { showTab("preview"); });
   tabHex.addEventListener("click", function () { showTab("hex"); });
+  tabMediaInfo.addEventListener("click", function () { showTab("mediainfo"); });
 
   previewPlayBtn.addEventListener("click", function () { startPlayback(); });
   previewPrevBtn.addEventListener("click", function () { stepFrame(-1); });
@@ -1000,7 +1090,12 @@ timeline.addEventListener("click", function (e) {
         currentWarnings = result.data.warnings || [];
         computeFrames();
 
-        codecBadge.textContent = currentCodec.toUpperCase();
+        var si = result.data.streamInfo;
+        var chroma = ["4:0:0", "4:2:0", "4:2:2", "4:4:4"][si.chromaFormat] || ("4:2:" + si.chromaFormat);
+        var badgeText = currentCodec.toUpperCase();
+        if (si.bitDepth !== undefined) badgeText += " · " + si.bitDepth + "-bit";
+        if (si.chromaFormat !== undefined) badgeText += " · " + chroma;
+        codecBadge.textContent = badgeText;
         codecBadge.classList.remove("hidden");
         dropzone.classList.add("hidden");
         resetBtn.classList.remove("hidden");
@@ -1018,6 +1113,8 @@ timeline.addEventListener("click", function (e) {
         presetPreviewCanvas();
         syntaxTree.innerHTML = "";
         syntaxTitle.textContent = "";
+        mediaInfoView.innerHTML = "";
+        mediaInfoView.dataset.rendered = "";
 
         if (currentData.nalus.length > 0) selectNal(0, false);
 
@@ -1070,6 +1167,8 @@ timeline.addEventListener("click", function (e) {
     nalRows.innerHTML = "";
     syntaxTree.innerHTML = "";
     syntaxTitle.textContent = "";
+    mediaInfoView.innerHTML = "";
+    mediaInfoView.dataset.rendered = "";
     hexView.innerHTML = "";
     previewMsg.textContent = "Click a frame on the timeline to preview";
     previewHint.textContent = "";
