@@ -879,6 +879,7 @@ timeline.addEventListener("click", function (e) {
       }
       return new Uint8Array(out);
     }
+    function rev32(v) { var r = 0; for (var i = 0; i < 32; i++) { r = (r << 1) | (v & 1); v >>>= 1; } return r >>> 0; }
     if (currentCodec === "avc") {
       var si = findNalByType(7);
       if (si < 0) return null;
@@ -888,6 +889,19 @@ timeline.addEventListener("click", function (e) {
       return (currentDescription ? "avc1" : "avc3") + "." + hx(sps[1]) + hx(sps[2]) + hx(sps[3]);
     }
     if (currentCodec === "hevc") {
+      // 有 hvcC description 时，直接用它的一般 profile 字段（不受 max_sub_layers 影响）
+      if (currentDescription && currentDescription.length >= 13) {
+        var dp = currentDescription[1];
+        var dSpace = (dp >> 6) & 3;
+        var dTier = (dp >> 5) & 1;
+        var dProfileIdc = dp & 0x1F;
+        var dCompat = (currentDescription[2] << 24) | (currentDescription[3] << 16) | (currentDescription[4] << 8) | currentDescription[5];
+        var dLevel = currentDescription[12];
+        var dSpaceChar = ["", "A", "B", "C"][dSpace];
+        var dCompatHex = rev32(dCompat).toString(16).toUpperCase();
+        var dTierChar = dTier ? "H" : "L";
+        return "hvc1." + dSpaceChar + dProfileIdc + "." + dCompatHex + "." + dTierChar + dLevel + ".B0";
+      }
       var si = findNalByType(33);
       if (si < 0) return null;
       var sps = stripEP(nalData(currentData.nalus[si]));
@@ -899,10 +913,7 @@ timeline.addEventListener("click", function (e) {
       var compat = (sps[4] << 24) | (sps[5] << 16) | (sps[6] << 8) | sps[7];
       var level = sps[14];
       var spaceChar = ["", "A", "B", "C"][space];
-      // codec string 里 compat/constraint 是 bit-reversed（ISO 14496-15）
-      function rev32(v) { var r = 0; for (var i = 0; i < 32; i++) { r = (r << 1) | (v & 1); v >>>= 1; } return r >>> 0; }
       var compatHex = rev32(compat).toString(16).toUpperCase();
-      // constraint indicator flags：48 bits（SPS 偏移 8..13），整体 bit-reverse 后转 hex（去前导 0）
       var constraintHex = "";
       var cstarted = false;
       for (var cb = 47; cb >= 0; cb--) {
@@ -914,7 +925,7 @@ timeline.addEventListener("click", function (e) {
       if (constraintHex === "") constraintHex = "0";
       constraintHex = parseInt(constraintHex, 2).toString(16).toUpperCase();
       var tierChar = tier ? "H" : "L";
-      return (currentDescription ? "hvc1" : "hev1") + "." + spaceChar + profileIdc + "." + compatHex + "." + tierChar + level + "." + constraintHex;
+      return "hev1." + spaceChar + profileIdc + "." + compatHex + "." + tierChar + level + "." + constraintHex;
     }
     return null;
   }
