@@ -934,6 +934,7 @@ timeline.addEventListener("click", function (e) {
     var c = previewCanvas;
     var w = frame.displayWidth, h = frame.displayHeight;
     if (w <= 0 || h <= 0) { w = frame.codedWidth; h = frame.codedHeight; }
+    if (w <= 0 || h <= 0) { w = frame.width; h = frame.height; } // ImageBitmap
     var maxW = previewView.clientWidth - 32;
     var maxH = 480;
     if (maxW < 160) maxW = 160;
