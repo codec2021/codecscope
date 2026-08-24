@@ -9,6 +9,7 @@
   var currentDescription = null; // 解码器 description（hvcC/avcC 原始字节，MP4 容器时）
   var currentNalLengthSize = 4;  // description 存在时的 NAL 长度前缀字节数
   var currentContainerInfo = null; // MP4 容器级信息（General/Video/Audio/Other）
+  var currentImageBlob = null;     // HEIC/HEIF 原始文件 Blob（用于原生解码预览）
   var selectedIndex = -1;
 
   var statusEl = document.getElementById("status");
@@ -946,7 +947,20 @@ timeline.addEventListener("click", function (e) {
   }
 
   function previewFrame(sliceIndex) {
-    if (!fileBytes || !currentData || !timeline._slices) return;
+    if (!fileBytes || !currentData) return;
+    // HEIC/HEIF 静态图像：用原生 createImageBitmap 解码显示
+    if (currentData.isImage && currentImageBlob) {
+      previewHint.textContent = "Decoding image...";
+      previewMsg.textContent = "";
+      createImageBitmap(currentImageBlob).then(function (bmp) {
+        drawVideoFrame(bmp);
+        previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
+      }).catch(function (err) {
+        previewMsg.textContent = "Cannot decode image: " + err.message;
+      });
+      return;
+    }
+    if (!timeline._slices) return;
     if (currentCodec === "vvc") {
       previewMsg.textContent = "H.266 (VVC) cannot be decoded in browser";
       return;
@@ -1147,6 +1161,7 @@ timeline.addEventListener("click", function (e) {
           fileBytes = heic.annexb;
           currentDescription = heic.description || null;
           currentNalLengthSize = heic.nalLengthSize || 4;
+          currentImageBlob = new Blob([rawBytes], { type: "image/heic" });
           isImage = true;
           imageW = heic.picWidth || 0;
           imageH = heic.picHeight || 0;
@@ -1193,7 +1208,8 @@ timeline.addEventListener("click", function (e) {
         dropzone.classList.add("hidden");
         resetBtn.classList.remove("hidden");
         statsBar.classList.remove("hidden");
-        timelinePanel.classList.remove("hidden");
+        if (isImage) timelinePanel.classList.add("hidden");
+        else timelinePanel.classList.remove("hidden");
         mainArea.classList.remove("hidden");
         bottomPanels.classList.remove("hidden");
 
@@ -1202,7 +1218,7 @@ timeline.addEventListener("click", function (e) {
         renderHdr(currentData.hdr);
         renderWarnings();
         selectedSlice = -1;
-        renderTimeline();
+        if (!isImage) renderTimeline();
         presetPreviewCanvas();
         syntaxTree.innerHTML = "";
         syntaxTitle.textContent = "";
@@ -1210,6 +1226,7 @@ timeline.addEventListener("click", function (e) {
         mediaInfoView.dataset.rendered = "";
 
         if (currentData.nalus.length > 0) selectNal(0, false);
+        if (isImage) { showTab("preview"); previewFrame(0); }
 
         setStatus("Parsed: " + currentCodec.toUpperCase() + ", " + currentData.nalus.length + " NAL units" + srcNote + ", " + (t1 - t0).toFixed(0) + " ms");
       } catch (err) {
@@ -1231,6 +1248,7 @@ timeline.addEventListener("click", function (e) {
     currentDescription = null;
     currentNalLengthSize = 4;
     currentContainerInfo = null;
+    currentImageBlob = null;
     selectedIndex = -1;
     timeline._base = null;
     timeline._baseBarW = null;
