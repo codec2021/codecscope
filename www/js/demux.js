@@ -222,7 +222,7 @@
   }
 
   function parseHeic(d) {
-    // 解析 HEIC/HEIF 单帧图像：meta → iprp/ipco 里的 ispe(分辨率) + hvcC(HEVC 配置)
+    // 解析 HEIC/HEIF 图像：meta → iprp/ipco 里的 ispe(分辨率) + hvcC(HEVC 配置) + iloc(图像数据)
     var meta = findBox(d, 0, d.length, "meta");
     if (!meta) return null;
     // meta 是 FullBox：content 从 offset+12（size4+type4+version/flags4）
@@ -232,7 +232,6 @@
     // 在 meta 内找 iprp（item properties，普通 Box）
     var iprp = findBox(d, metaContent, metaEnd, "iprp");
     if (!iprp) return null;
-    // iprp 是普通 Box：content 从 offset+8
     var iprpContent = iprp.offset + 8;
     var iprpEnd = iprp.offset + iprp.size;
 
@@ -248,10 +247,10 @@
     if (!hvcc) return null;
 
     // 从 hvcC 提取 VPS/SPS/PPS（HEVCDecoderConfigurationRecord）
-    var c = hvcc.offset + 8; // 跳过 size(4)+type(4)，到 configurationVersion
+    var c = hvcc.offset + 8;
     var description = d.subarray(c, hvcc.offset + hvcc.size);
     var paramNals = [];
-    var na = d[c + 22]; // numOfArrays
+    var na = d[c + 22];
     var np = c + 23;
     for (var q2 = 0; q2 < na; q2++) {
       var ntype = d[np] & 0x3F;
@@ -265,9 +264,91 @@
       }
     }
 
-    // 组装 annexb（仅参数集，图像数据在 mdat 里，这里不取）
+    // 解析 iloc：找到所有 item 的 extent（数据是 length-prefixed NAL）
+    var iloc = findBox(d, metaContent, metaEnd, "iloc");
+    var ilocItems = [];
+    if (iloc) {
+      var p = iloc.offset + 8;
+      var version = d[p]; p++; p += 3; // flags
+      var offsetSize = d[p] >> 4, lengthSize = d[p] & 0x0F; p++;
+      var baseOffsetSize = d[p] >> 4, indexSize = (version === 1 || version === 2) ? (d[p] & 0x0F) : 0; p++;
+      var itemCount = (version < 2) ? readU16(d, p) : readU32(d, p); p += (version < 2 ? 2 : 4);
+      for (var qi = 0; qi < itemCount; qi++) {
+        var itemId = (version < 2) ? readU16(d, p) : readU32(d, p); p += (version < 2 ? 2 : 4);
+        var constructionMethod = 0;
+        if (version === 1 || version === 2) { constructionMethod = readU16(d, p) & 0x0F; p += 2; }
+        p += 2; // data_reference_index
+        // base_offset
+        var baseOffset = 0;
+        for (var kb = 0; kb < baseOffsetSize; kb++) { baseOffset = baseOffset * 256 + d[p]; p++; }
+        var extentCount = readU16(d, p); p += 2;
+        var extents = [];
+        for (var qe = 0; qe < extentCount; qe++) {
+          if (indexSize > 0) p += indexSize;
+          var eoff = 0, elen = 0;
+          for (var ko = 0; ko < offsetSize; ko++) { eoff = eoff * 256 + d[p]; p++; }
+          for (var kl = 0; kl < lengthSize; kl++) { elen = elen * 256 + d[p]; p++; }
+          extents.push({ offset: baseOffset + eoff, length: elen });
+        }
+        ilocItems.push({ id: itemId, constructionMethod: constructionMethod, extents: extents });
+      }
+    }
+
+    // 解析 iref 里 primary item 引用的 tile item（dimg 引用）
+    var pitm = findBox(d, metaContent, metaEnd, "pitm");
+    var primaryId = pitm ? readU16(d, pitm.offset + 12) : 0;
+    var tileIds = [];
+    var iref = findBox(d, metaContent, metaEnd, "iref");
+    if (iref) {
+      var rp = iref.offset + 12; // iref 是 fullbox，content 从 +12
+      var rEnd = iref.offset + iref.size;
+      while (rp + 8 <= rEnd) {
+        var rSize = boxSize(d, rp);
+        if (rSize < 8 || rp + rSize > rEnd) break;
+        var rType = fourCC(d, rp + 4);
+        if (rType === "dimg") {
+          // dimg 不是 fullbox：size(4)+type(4)+from_item_ID(2)+refCount(2)+to_item_IDs
+          var fromItem = readU16(d, rp + 8);
+          var refCount = readU16(d, rp + 10);
+          var refs = [];
+          for (var kr = 0; kr < refCount; kr++) refs.push(readU16(d, rp + 12 + kr * 2));
+          if (fromItem === primaryId) tileIds = refs;
+        }
+        rp += rSize;
+      }
+    }
+
+    // 若 primary 是 grid 且无 tile 引用，尝试用第一个 hvc1 item
+    var dataNals = [];
+    var targetIds = tileIds.length > 0 ? tileIds : [];
+    if (targetIds.length === 0) {
+      // 回退：取所有 constructionMethod=0 的 hvc1 item（单帧图）
+      for (var tt = 0; tt < ilocItems.length; tt++) {
+        if (ilocItems[tt].constructionMethod === 0) targetIds.push(ilocItems[tt].id);
+      }
+    }
+    // 提取这些 item 的 length-prefixed NAL 数据（去掉 4 字节 length prefix）
+    // 只取第一个 tile：网格图的 tile 是独立 HEVC 帧，全拼会导致解析器状态错乱
+    var maxTiles = 1;
+    for (var ti = 0; ti < targetIds.length && ti < maxTiles; ti++) {
+      var it = null;
+      for (var fj = 0; fj < ilocItems.length; fj++) if (ilocItems[fj].id === targetIds[ti]) { it = ilocItems[fj]; break; }
+      if (it && it.extents.length > 0) {
+        var ext = it.extents[0];
+        var dataOff = ext.offset; // 相对文件开头
+        if (dataOff >= 0 && dataOff + ext.length <= d.length) {
+          var nalLen = readU32(d, dataOff);
+          if (nalLen > 0 && nalLen <= ext.length) {
+            dataNals.push(d.subarray(dataOff + 4, dataOff + 4 + nalLen));
+          }
+        }
+      }
+    }
+
+    // 组装 annexb：参数集 + 图像数据 NAL
     var totalSize = 0;
     for (var q4 = 0; q4 < paramNals.length; q4++) totalSize += paramNals[q4].length + 4;
+    for (var q6 = 0; q6 < dataNals.length; q6++) totalSize += dataNals[q6].length + 4;
     var out = new Uint8Array(totalSize);
     var w = 0;
     for (var q5 = 0; q5 < paramNals.length; q5++) {
@@ -276,10 +357,15 @@
       out.set(paramNals[q5], w);
       w += paramNals[q5].length;
     }
+    for (var q7 = 0; q7 < dataNals.length; q7++) {
+      out[w] = 0; out[w + 1] = 0; out[w + 2] = 0; out[w + 3] = 1;
+      w += 4;
+      out.set(dataNals[q7], w);
+      w += dataNals[q7].length;
+    }
 
     var picWidth = 0, picHeight = 0;
     if (ispe) {
-      // ispe FullBox: version/flags(4) + width(4) + height(4)
       picWidth = readU32(d, ispe.offset + 12);
       picHeight = readU32(d, ispe.offset + 16);
     }
