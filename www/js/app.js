@@ -958,30 +958,141 @@ timeline.addEventListener("click", function (e) {
     previewCanvas.height = Math.max(1, Math.round(h * scale));
   }
 
+  // 从 hvcC description 字节推导 codec string（hvc1.xxx）
+  function deriveHvc1CodecString(desc) {
+    if (!desc || desc.length < 13) return null;
+    function rev32(v) { var r = 0; for (var i = 0; i < 32; i++) { r = (r << 1) | (v & 1); v >>>= 1; } return r >>> 0; }
+    var b1 = desc[1];
+    var space = (b1 >> 6) & 3, tier = (b1 >> 5) & 1, profileIdc = b1 & 0x1F;
+    var compat = (desc[2] << 24) | (desc[3] << 16) | (desc[4] << 8) | desc[5];
+    var level = desc[12];
+    var spaceChar = ["", "A", "B", "C"][space];
+    var compatHex = rev32(compat).toString(16).toUpperCase();
+    var tierChar = tier ? "H" : "L";
+    var cBits = "", started = false;
+    for (var cb = 47; cb >= 0; cb--) {
+      var bi2 = 6 + (cb >> 3), bit = (desc[bi2] >> (cb & 7)) & 1;
+      if (bit || started) { started = true; cBits += bit; }
+    }
+    var cHex = parseInt(cBits || "0", 2).toString(16).toUpperCase();
+    return "hvc1." + spaceChar + profileIdc + "." + compatHex + "." + tierChar + level + "." + cHex;
+  }
+
   function previewHeicFallback() {
-    // 用 VideoDecoder 解码 annexb 里的 IDR 帧（首个 tile）
     if (!("VideoDecoder" in window)) {
       previewMsg.textContent = "Browser does not support WebCodecs HEVC decoding";
       return;
     }
     if (play.active) stopPlayback();
-    initPlayDecoder(function () {
-      feedFrames(0);
-      var waited = 0;
-      var check = setInterval(function () {
-        var frame = play.frames[0];
-        if (frame) {
-          clearInterval(check);
-          drawVideoFrame(frame);
-          previewHint.textContent = "Image " + frame.displayWidth + " x " + frame.displayHeight + " (first tile)";
+
+    var tiles = currentData.tiles;
+
+    // ---- 单 tile / 无 tiles：走原有 play decoder 逻辑 ----
+    if (!tiles || tiles.length <= 1) {
+      initPlayDecoder(function () {
+        feedFrames(0);
+        var waited = 0;
+        var check = setInterval(function () {
+          var frame = play.frames[0];
+          if (frame) {
+            clearInterval(check);
+            drawVideoFrame(frame);
+            previewHint.textContent = "Image " + frame.displayWidth + " x " + frame.displayHeight;
+            return;
+          }
+          waited += 10;
+          if (waited > PLAY_PREVIEW_TIMEOUT) {
+            clearInterval(check);
+            if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
+          }
+        }, 10);
+      });
+      return;
+    }
+
+    // ---- 多 tile 拼接 ----
+    var tileCount = tiles.length;
+    previewMsg.textContent = "Decoding " + tileCount + " tiles...";
+    previewHint.textContent = "";
+
+    var codecStr = deriveHvc1CodecString(tiles[0].description);
+    if (!codecStr) { previewMsg.textContent = "Cannot determine codec"; return; }
+
+    var decodedFrames = new Array(tileCount);
+    var decoded = 0;
+    var tileW = 0, tileH = 0;
+    var outW = currentData.hdr.picWidth || 0;
+    var outH = currentData.hdr.picHeight || 0;
+    var rows = 0, cols = 0;
+
+    function onTileOutput(frame, idx) {
+      decodedFrames[idx] = frame;
+      decoded++;
+      previewMsg.textContent = "Decoded " + decoded + "/" + tileCount;
+
+      if (idx === 0) {
+        tileW = frame.displayWidth || frame.codedWidth;
+        tileH = frame.displayHeight || frame.codedHeight;
+        if (!outW || !outH) { outW = tileW; outH = tileH; }
+        cols = Math.max(1, Math.round(outW / tileW));
+        rows = Math.max(1, Math.round(outH / tileH));
+        // 修正：确保 rows*cols >= tileCount
+        while (rows * cols < tileCount) { if (cols <= rows) cols++; else rows++; }
+      }
+
+      if (decoded >= tileCount) stitchAndDisplay();
+      else decodeOne(decoded);
+    }
+
+    function decodeOne(idx) {
+      if (idx >= tileCount) return;
+      var tile = tiles[idx];
+      var chunk = new EncodedVideoChunk({ type: "key", timestamp: idx * 1000, data: tile.annexb });
+      curDecoder.decode(chunk);
+    }
+
+    function stitchAndDisplay() {
+      var canvas = previewCanvas;
+      var maxW = previewView.clientWidth - 32;
+      var maxH = 480;
+      if (maxW < 160) maxW = 160;
+      var scale = Math.min(1, maxW / outW, maxH / outH);
+      canvas.width = Math.max(1, Math.round(outW * scale));
+      canvas.height = Math.max(1, Math.round(outH * scale));
+      var ctx = canvas.getContext("2d");
+      var sx = canvas.width / outW, sy = canvas.height / outH;
+
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          var fi = r * cols + c;
+          if (fi < decodedFrames.length && decodedFrames[fi]) {
+            var fr = decodedFrames[fi];
+            var fw = fr.displayWidth || fr.codedWidth;
+            var fh = fr.displayHeight || fr.codedHeight;
+            ctx.drawImage(fr, c * tileW * sx, r * tileH * sy, fw * sx, fh * sy);
+          }
         }
-        waited += 10;
-        if (waited > PLAY_PREVIEW_TIMEOUT) {
-          clearInterval(check);
-          if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
-        }
-      }, 10);
+      }
+
+      previewHint.textContent = "Image " + outW + " x " + outH + " (" + tileCount + " tiles stitched)";
+      previewMsg.textContent = "";
+      previewCanvasTouched = true;
+
+      for (var i = 0; i < decodedFrames.length; i++) if (decodedFrames[i]) decodedFrames[i].close();
+    }
+
+    var curDecoder = new VideoDecoder({
+      output: function (frame) { onTileOutput(frame, decoded); },
+      error: function (e) { previewMsg.textContent = "Decode error: " + e.message; }
     });
+    curDecoder.configure({
+      codec: codecStr,
+      codedWidth: outW || 1920,
+      codedHeight: outH || 1080,
+      description: tiles[0].description
+    });
+
+    decodeOne(0);
   }
 
   function previewFrame(sliceIndex) {
@@ -1233,6 +1344,10 @@ timeline.addEventListener("click", function (e) {
             currentData.hdr = currentData.hdr || {};
             currentData.hdr.picWidth = imageW;
             currentData.hdr.picHeight = imageH;
+          }
+          if (heic) {
+            currentData.grid = heic.grid || null;
+            currentData.tiles = heic.tiles || null;
           }
         }
         computeFrames();

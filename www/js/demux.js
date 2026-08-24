@@ -241,35 +241,86 @@
     var ipcoContent = ipco.offset + 8;
     var ipcoEnd = ipco.offset + ipco.size;
 
-    // 找 ispe（分辨率，FullBox）和 hvcC（HEVC 配置，普通 Box）
-    var ispe = findBox(d, ipcoContent, ipcoEnd, "ispe");
-    var hvcc = findBox(d, ipcoContent, ipcoEnd, "hvcC");
-    if (!hvcc) return null;
+    // 收集 ipco 里所有 box（按顺序），找 ispe / hvcC / grid
+    var ipcoBoxes = [];
+    var ispeOff = null, hvccOff = null, gridOff = null;
+    var bp = ipcoContent;
+    while (bp + 8 <= ipcoEnd) {
+      var bsz = boxSize(d, bp);
+      if (bsz < 8 || bp + bsz > ipcoEnd) break;
+      var bcc = fourCC(d, bp + 4);
+      ipcoBoxes.push({ off: bp, sz: bsz, cc: bcc });
+      if (bcc === "ispe" && !ispeOff) ispeOff = bp;
+      if (bcc === "hvcC" && !hvccOff) hvccOff = bp;
+      if (bcc === "grid" && !gridOff) gridOff = bp;
+      bp += bsz;
+    }
+    if (!hvccOff) return null;
 
-    // 从 hvcC 提取 VPS/SPS/PPS（HEVCDecoderConfigurationRecord）
-    var c = hvcc.offset + 8;
-    var description = d.subarray(c, hvcc.offset + hvcc.size);
-    var paramNals = [];
-    var na = d[c + 22];
-    var np = c + 23;
-    for (var q2 = 0; q2 < na; q2++) {
-      var ntype = d[np] & 0x3F;
-      var numNalus = readU16(d, np + 1);
-      np += 3;
-      for (var q3 = 0; q3 < numNalus; q3++) {
-        var nlen = readU16(d, np);
-        if (ntype === 32 || ntype === 33 || ntype === 34)
-          paramNals.push(d.subarray(np + 2, np + 2 + nlen));
-        np += 2 + nlen;
+    // 解析 ipma（item → property 关联）
+    var ipma = findBox(d, metaContent, metaEnd, "ipma");
+    var itemToProps = {};
+    if (ipma) {
+      var ip = ipma.offset + 8;
+      var ipVer = d[ip]; ip++; ip += 3;
+      var entryCount = readU32(d, ip); ip += 4;
+      for (var ie = 0; ie < entryCount; ie++) {
+        var itemId = readU16(d, ip); ip += 2;
+        var propCount = d[ip]; ip += 1;
+        var props = [];
+        for (var ipj = 0; ipj < propCount; ipj++) {
+          var propIdx = (ipVer >= 1) ? (readU16(d, ip) & 0x7FFF) : readU16(d, ip);
+          ip += 2;
+          props.push(propIdx);
+        }
+        itemToProps[itemId] = props;
       }
     }
 
-    // 解析 iloc：找到所有 item 的 extent（数据是 length-prefixed NAL）
+    // 为某个 item 找到其 hvcC box offset
+    function itemHvcc(itemId) {
+      var props = itemToProps[itemId];
+      if (props) {
+        for (var pi = 0; pi < props.length; pi++) {
+          var idx = props[pi] - 1;
+          if (idx >= 0 && idx < ipcoBoxes.length && ipcoBoxes[idx].cc === "hvcC")
+            return ipcoBoxes[idx].off;
+        }
+      }
+      return hvccOff;
+    }
+
+    // 从 hvcC 提取 VPS/SPS/PPS
+    function parseHvccNals(off) {
+      var c2 = off + 8;
+      var nals = [];
+      var na2 = d[c2 + 22];
+      var np2 = c2 + 23;
+      for (var a = 0; a < na2; a++) {
+        var nt = d[np2] & 0x3F;
+        var nn = readU16(d, np2 + 1);
+        np2 += 3;
+        for (var b = 0; b < nn; b++) {
+          var nl = readU16(d, np2);
+          if (nt === 32 || nt === 33 || nt === 34)
+            nals.push(d.subarray(np2 + 2, np2 + 2 + nl));
+          np2 += 2 + nl;
+        }
+      }
+      return nals;
+    }
+
+    // 主 hvcC：用于 WASM 解析器 + description
+    var mainC = hvccOff + 8;
+    var description = d.subarray(mainC, hvccOff + boxSize(d, hvccOff));
+    var paramNals = parseHvccNals(hvccOff);
+
+    // 解析 iloc
     var iloc = findBox(d, metaContent, metaEnd, "iloc");
     var ilocItems = [];
     if (iloc) {
       var p = iloc.offset + 8;
-      var version = d[p]; p++; p += 3; // flags
+      var version = d[p]; p++; p += 3;
       var offsetSize = d[p] >> 4, lengthSize = d[p] & 0x0F; p++;
       var baseOffsetSize = d[p] >> 4, indexSize = (version === 1 || version === 2) ? (d[p] & 0x0F) : 0; p++;
       var itemCount = (version < 2) ? readU16(d, p) : readU32(d, p); p += (version < 2 ? 2 : 4);
@@ -277,8 +328,7 @@
         var itemId = (version < 2) ? readU16(d, p) : readU32(d, p); p += (version < 2 ? 2 : 4);
         var constructionMethod = 0;
         if (version === 1 || version === 2) { constructionMethod = readU16(d, p) & 0x0F; p += 2; }
-        p += 2; // data_reference_index
-        // base_offset
+        p += 2;
         var baseOffset = 0;
         for (var kb = 0; kb < baseOffsetSize; kb++) { baseOffset = baseOffset * 256 + d[p]; p++; }
         var extentCount = readU16(d, p); p += 2;
@@ -294,20 +344,18 @@
       }
     }
 
-    // 解析 iref 里 primary item 引用的 tile item（dimg 引用）
+    // 解析 iref：primary → tile (dimg)
     var pitm = findBox(d, metaContent, metaEnd, "pitm");
     var primaryId = pitm ? readU16(d, pitm.offset + 12) : 0;
     var tileIds = [];
     var iref = findBox(d, metaContent, metaEnd, "iref");
     if (iref) {
-      var rp = iref.offset + 12; // iref 是 fullbox，content 从 +12
+      var rp = iref.offset + 12;
       var rEnd = iref.offset + iref.size;
       while (rp + 8 <= rEnd) {
         var rSize = boxSize(d, rp);
         if (rSize < 8 || rp + rSize > rEnd) break;
-        var rType = fourCC(d, rp + 4);
-        if (rType === "dimg") {
-          // dimg 不是 fullbox：size(4)+type(4)+from_item_ID(2)+refCount(2)+to_item_IDs
+        if (fourCC(d, rp + 4) === "dimg") {
           var fromItem = readU16(d, rp + 8);
           var refCount = readU16(d, rp + 10);
           var refs = [];
@@ -318,66 +366,92 @@
       }
     }
 
-    // 若 primary 是 grid 且无 tile 引用，尝试用第一个 hvc1 item
-    var dataNals = [];
+    // 构建目标 item 列表
     var targetIds = tileIds.length > 0 ? tileIds : [];
     if (targetIds.length === 0) {
-      // 回退：取所有 constructionMethod=0 的 hvc1 item（单帧图）
       for (var tt = 0; tt < ilocItems.length; tt++) {
         if (ilocItems[tt].constructionMethod === 0) targetIds.push(ilocItems[tt].id);
       }
     }
-    // 提取这些 item 的 length-prefixed NAL 数据（去掉 4 字节 length prefix）
-    // 只取第一个 tile：网格图的 tile 是独立 HEVC 帧，全拼会导致解析器状态错乱
-    var maxTiles = 1;
-    for (var ti = 0; ti < targetIds.length && ti < maxTiles; ti++) {
+
+    // 提取每个 tile：读取 extent 里全部 length-prefixed NAL，用 tile 自己的 hvcC 参数集
+    var tiles = [];
+    var firstTileAnnexb = null;
+    for (var ti = 0; ti < targetIds.length; ti++) {
       var it = null;
-      for (var fj = 0; fj < ilocItems.length; fj++) if (ilocItems[fj].id === targetIds[ti]) { it = ilocItems[fj]; break; }
-      if (it && it.extents.length > 0) {
-        var ext = it.extents[0];
-        var dataOff = ext.offset; // 相对文件开头
-        if (dataOff >= 0 && dataOff + ext.length <= d.length) {
-          var nalLen = readU32(d, dataOff);
-          if (nalLen > 0 && nalLen <= ext.length) {
-            dataNals.push(d.subarray(dataOff + 4, dataOff + 4 + nalLen));
-          }
-        }
+      for (var fj = 0; fj < ilocItems.length; fj++) {
+        if (ilocItems[fj].id === targetIds[ti]) { it = ilocItems[fj]; break; }
       }
+      if (!it || it.extents.length === 0) continue;
+      var ext = it.extents[0];
+      var dataOff = ext.offset;
+      if (dataOff < 0 || dataOff + ext.length > d.length) continue;
+
+      // 读取 extent 里所有 length-prefixed NAL
+      var tileNals = [];
+      var pos = dataOff, endPos = dataOff + ext.length;
+      while (pos + 4 <= endPos) {
+        var nalLen = readU32(d, pos); pos += 4;
+        if (nalLen > 0 && pos + nalLen <= endPos) {
+          tileNals.push(d.subarray(pos, pos + nalLen));
+          pos += nalLen;
+        } else break;
+      }
+      if (tileNals.length === 0) continue;
+
+      // tile 的 hvcC 参数集
+      var tHvcc = itemHvcc(it.id);
+      var tParamNals = parseHvccNals(tHvcc);
+      var tDesc = d.subarray(tHvcc + 8, tHvcc + boxSize(d, tHvcc));
+
+      // 组装 annexb
+      var totalSize = 0;
+      for (var tq = 0; tq < tParamNals.length; tq++) totalSize += tParamNals[tq].length + 4;
+      for (var tq2 = 0; tq2 < tileNals.length; tq2++) totalSize += tileNals[tq2].length + 4;
+      var annexb = new Uint8Array(totalSize);
+      var tw = 0;
+      for (var tq3 = 0; tq3 < tParamNals.length; tq3++) {
+        annexb[tw] = 0; annexb[tw+1] = 0; annexb[tw+2] = 0; annexb[tw+3] = 1; tw += 4;
+        annexb.set(tParamNals[tq3], tw); tw += tParamNals[tq3].length;
+      }
+      for (var tq4 = 0; tq4 < tileNals.length; tq4++) {
+        annexb[tw] = 0; annexb[tw+1] = 0; annexb[tw+2] = 0; annexb[tw+3] = 1; tw += 4;
+        annexb.set(tileNals[tq4], tw); tw += tileNals[tq4].length;
+      }
+
+      tiles.push({ annexb: annexb, description: tDesc });
+      if (!firstTileAnnexb) firstTileAnnexb = annexb;
     }
 
-    // 组装 annexb：参数集 + 图像数据 NAL
-    var totalSize = 0;
-    for (var q4 = 0; q4 < paramNals.length; q4++) totalSize += paramNals[q4].length + 4;
-    for (var q6 = 0; q6 < dataNals.length; q6++) totalSize += dataNals[q6].length + 4;
-    var out = new Uint8Array(totalSize);
-    var w = 0;
-    for (var q5 = 0; q5 < paramNals.length; q5++) {
-      out[w] = 0; out[w + 1] = 0; out[w + 2] = 0; out[w + 3] = 1;
-      w += 4;
-      out.set(paramNals[q5], w);
-      w += paramNals[q5].length;
-    }
-    for (var q7 = 0; q7 < dataNals.length; q7++) {
-      out[w] = 0; out[w + 1] = 0; out[w + 2] = 0; out[w + 3] = 1;
-      w += 4;
-      out.set(dataNals[q7], w);
-      w += dataNals[q7].length;
-    }
-
+    // 分辨率
     var picWidth = 0, picHeight = 0;
-    if (ispe) {
-      picWidth = readU32(d, ispe.offset + 12);
-      picHeight = readU32(d, ispe.offset + 16);
+    if (ispeOff) {
+      picWidth = readU32(d, ispeOff + 12);
+      picHeight = readU32(d, ispeOff + 16);
+    }
+
+    // grid 布局
+    var grid = null;
+    if (gridOff) {
+      var gp = gridOff + 8;
+      gp++; gp += 3; // version + flags
+      var rows = readU16(d, gp) + 1; gp += 2;
+      var outW = readU16(d, gp); gp += 2;
+      var outH = readU16(d, gp); gp += 2;
+      var cols = readU16(d, gp) + 1; gp += 2;
+      grid = { rows: rows, cols: cols, outputWidth: outW, outputHeight: outH };
     }
 
     return {
       codec: "hevc",
-      annexb: out,
+      annexb: firstTileAnnexb || new Uint8Array(0),
       description: description,
-      nalLengthSize: 1 + (d[c + 21] & 0x03),
+      nalLengthSize: 1 + (d[mainC + 21] & 0x03),
       picWidth: picWidth,
       picHeight: picHeight,
-      isImage: true
+      isImage: true,
+      grid: grid,
+      tiles: tiles.length > 1 ? tiles : null
     };
   }
 
