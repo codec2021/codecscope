@@ -946,17 +946,44 @@ timeline.addEventListener("click", function (e) {
     previewCanvas.height = Math.max(1, Math.round(h * scale));
   }
 
+  function previewHeicFallback() {
+    // 用 VideoDecoder 解码 annexb 里的 IDR 帧（首个 tile）
+    if (!("VideoDecoder" in window)) {
+      previewMsg.textContent = "Browser does not support WebCodecs HEVC decoding";
+      return;
+    }
+    if (play.active) stopPlayback();
+    initPlayDecoder(function () {
+      feedFrames(0);
+      var waited = 0;
+      var check = setInterval(function () {
+        var frame = play.frames[0];
+        if (frame) {
+          clearInterval(check);
+          drawVideoFrame(frame);
+          previewHint.textContent = "Image " + frame.displayWidth + " x " + frame.displayHeight + " (first tile)";
+        }
+        waited += 10;
+        if (waited > PLAY_PREVIEW_TIMEOUT) {
+          clearInterval(check);
+          if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
+        }
+      }, 10);
+    });
+  }
+
   function previewFrame(sliceIndex) {
     if (!fileBytes || !currentData) return;
-    // HEIC/HEIF 静态图像：用原生 createImageBitmap 解码显示
+    // HEIC/HEIF 静态图像：优先 createImageBitmap 完整图，失败后 VideoDecoder 解码 IDR tile
     if (currentData.isImage && currentImageBlob) {
       previewHint.textContent = "Decoding image...";
       previewMsg.textContent = "";
       createImageBitmap(currentImageBlob).then(function (bmp) {
         drawVideoFrame(bmp);
         previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
-      }).catch(function (err) {
-        previewMsg.textContent = "Cannot decode image: " + err.message;
+      }).catch(function () {
+        // 回退：用 VideoDecoder 解码提取的 IDR 数据（首个 tile）
+        previewHeicFallback();
       });
       return;
     }
@@ -1208,8 +1235,7 @@ timeline.addEventListener("click", function (e) {
         dropzone.classList.add("hidden");
         resetBtn.classList.remove("hidden");
         statsBar.classList.remove("hidden");
-        if (isImage) timelinePanel.classList.add("hidden");
-        else timelinePanel.classList.remove("hidden");
+        timelinePanel.classList.remove("hidden");
         mainArea.classList.remove("hidden");
         bottomPanels.classList.remove("hidden");
 
@@ -1218,7 +1244,7 @@ timeline.addEventListener("click", function (e) {
         renderHdr(currentData.hdr);
         renderWarnings();
         selectedSlice = -1;
-        if (!isImage) renderTimeline();
+        renderTimeline();
         presetPreviewCanvas();
         syntaxTree.innerHTML = "";
         syntaxTitle.textContent = "";
