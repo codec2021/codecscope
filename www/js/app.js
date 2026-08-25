@@ -960,13 +960,15 @@ timeline.addEventListener("click", function (e) {
   }
 
   // ---------- HEIC libheif 解码 ----------
+  var heicDecoding = false;
+
   function loadAndDecodeHeic() {
     if (typeof libheif !== "undefined") { decodeWithLibheif(); return; }
     previewMsg.textContent = "Loading HEIC decoder...";
     var s = document.createElement("script");
     s.src = "https://cdn.jsdelivr.net/npm/libheif-js@1.18.2/dist/libheif.min.js";
     s.onload = function () { decodeWithLibheif(); };
-    s.onerror = function () { previewMsg.textContent = "Failed to load HEIC decoder library"; };
+    s.onerror = function () { previewMsg.textContent = "Failed to load HEIC decoder library"; heicDecoding = false; };
     document.head.appendChild(s);
   }
 
@@ -974,7 +976,7 @@ timeline.addEventListener("click", function (e) {
     try {
       var decoder = new libheif.HeifDecoder();
       var results = decoder.decode(currentHeicRawBytes.buffer);
-      if (!results || results.length === 0) { previewMsg.textContent = "HEIC decode failed"; return; }
+      if (!results || results.length === 0) { previewMsg.textContent = "HEIC decode failed"; heicDecoding = false; return; }
       var image = results[0];
       var w = image.get_width(), h = image.get_height();
       var tmpCanvas = document.createElement("canvas");
@@ -991,16 +993,25 @@ timeline.addEventListener("click", function (e) {
         previewHint.textContent = "Image " + w + " x " + h;
         previewMsg.textContent = "";
         previewCanvasTouched = true;
+        heicDecoding = false;
+      }, function (err) {
+        console.error("libheif display error:", err);
+        previewMsg.textContent = "HEIC render error: " + (err && err.message ? err.message : err);
+        heicDecoding = false;
       });
     } catch (e) {
       console.error("libheif error:", e);
       previewMsg.textContent = "HEIC decode error: " + e.message;
+      heicDecoding = false;
     }
   }
 
   function previewFrame(sliceIndex) {
     if (!fileBytes || !currentData) return;
     if (currentData.isImage) {
+      if (play.active) stopPlayback();
+      if (heicDecoding) return;
+      heicDecoding = true;
       previewHint.textContent = "Decoding image...";
       previewMsg.textContent = "";
       if (currentHeicRawBytes) {
@@ -1010,13 +1021,19 @@ timeline.addEventListener("click", function (e) {
           createImageBitmap(currentImageBlob).then(function (bmp) {
             drawVideoFrame(bmp);
             previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
+            previewMsg.textContent = "";
+            heicDecoding = false;
           }).catch(function () { loadAndDecodeHeic(); });
         } else {
           loadAndDecodeHeic();
         }
+      } else {
+        previewMsg.textContent = "No image data available";
+        heicDecoding = false;
       }
       return;
     }
+    heicDecoding = false;
     if (!timeline._slices) return;
     if (currentCodec === "vvc") {
       previewMsg.textContent = "H.266 (VVC) cannot be decoded in browser";
@@ -1198,6 +1215,12 @@ timeline.addEventListener("click", function (e) {
   // ---------- 文件处理 ----------
   function handleFile(file) {
     if (!file) return;
+    if (play.active) stopPlayback();
+    if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
+    for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
+    play.frames = {};
+    play.feedFrame = -1;
+    heicDecoding = false;
     setStatus("Parsing " + file.name + " ...");
     fileNameEl.textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)";
 
@@ -1302,6 +1325,12 @@ timeline.addEventListener("click", function (e) {
   fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
 
   function resetAll() {
+    if (play.active) stopPlayback();
+    if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
+    for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
+    play.frames = {};
+    play.feedFrame = -1;
+    heicDecoding = false;
     currentData = null;
     currentCodec = null;
     currentWarnings = [];
