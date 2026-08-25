@@ -1111,16 +1111,13 @@ timeline.addEventListener("click", function (e) {
       var cfg = { codec: codecStr, codedWidth: outW || 1920, codedHeight: outH || 1080 };
 
       if (format === 0) {
-        // Annex B data, no description
         console.log("Format 0: annexb, no desc");
       } else if (format === 1) {
-        // Raw length-prefixed data + description
         cfg.description = tiles[0].description;
         console.log("Format 1: raw+desc, desc=" + tiles[0].description.length);
       } else {
-        // Raw + desc with level capped to 5.1 (153)
         var descCopy = new Uint8Array(tiles[0].description);
-        descCopy[12] = 153; // cap level to 5.1
+        descCopy[12] = 153;
         cfg.description = descCopy;
         console.log("Format 2: raw+desc+levelFix 5.1");
       }
@@ -1134,10 +1131,10 @@ timeline.addEventListener("click", function (e) {
         return;
       }
 
-    tryConfigureAndDecode(0);
+      decodeOne(0);
     }
 
-    decodeOne(0);
+    tryConfigureAndDecode(0);
   }
 
   function previewFrame(sliceIndex) {
