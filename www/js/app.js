@@ -1047,8 +1047,7 @@ timeline.addEventListener("click", function (e) {
     function decodeOne(idx) {
       if (idx >= tileCount) return;
       var tile = tiles[idx];
-      var data = (triedFormat === 0) ? tile.annexb : tile.raw;
-      var chunk = new EncodedVideoChunk({ type: "key", timestamp: idx * 1000, data: data });
+      var chunk = new EncodedVideoChunk({ type: "key", timestamp: idx * 1000, data: tile.raw });
       curDecoder.decode(chunk);
     }
 
@@ -1082,73 +1081,71 @@ timeline.addEventListener("click", function (e) {
       for (var i = 0; i < decodedFrames.length; i++) if (decodedFrames[i]) decodedFrames[i].close();
     }
 
-    var curDecoder = null;
-    var triedFormat = 0; // 0=annexb no desc, 1=raw+desc, 2=raw+desc+levelFix
+    // 估算 tile 尺寸（用于 VideoDecoder codedWidth/codedHeight）
+    var tileW = 0, tileH = 0;
+    if (currentData.grid) {
+      tileW = Math.round(outW / currentData.grid.cols);
+      tileH = Math.round(outH / currentData.grid.rows);
+    } else if (tileCount > 1) {
+      // 从 tile 数推算最接近正方形的 grid
+      var bestR = 1, bestC = tileCount, bestErr = Infinity;
+      for (var r = 1; r <= tileCount; r++) {
+        if (tileCount % r !== 0) continue;
+        var c = tileCount / r;
+        var err = Math.abs((outW / c) / (outH / r) - 1);
+        if (err < bestErr) { bestErr = err; bestR = r; bestC = c; }
+      }
+      tileW = Math.round(outW / bestC);
+      tileH = Math.round(outH / bestR);
+    } else {
+      tileW = outW || 64;
+      tileH = outH || 64;
+    }
+    if (tileW < 16) tileW = 16;
+    if (tileH < 16) tileH = 16;
 
-    function tryConfigureAndDecode(format) {
-      triedFormat = format;
-      if (curDecoder) { try { curDecoder.close(); } catch(e){} }
+    // 先检测浏览器是否支持该 HEVC 配置
+    var testCfg = { codec: codecStr, codedWidth: tileW, codedHeight: tileH, description: tiles[0].description };
+    if (typeof VideoDecoder.isConfigSupported === "function") {
+      VideoDecoder.isConfigSupported(testCfg).then(function (result) {
+        if (result.supported) {
+          startTileDecode(tileW, tileH);
+        } else {
+          // 尝试不带 description
+          VideoDecoder.isConfigSupported({ codec: codecStr, codedWidth: tileW, codedHeight: tileH }).then(function (r2) {
+            if (r2.supported) startTileDecode(tileW, tileH);
+            else previewMsg.textContent = "HEVC decoding not supported in this browser. Try Safari.";
+          }).catch(function () {
+            previewMsg.textContent = "HEVC decoding not supported in this browser. Try Safari.";
+          });
+        }
+      }).catch(function () {
+        startTileDecode(tileW, tileH);
+      });
+    } else {
+      startTileDecode(tileW, tileH);
+    }
+
+    var curDecoder = null;
+
+    function startTileDecode(tw, th) {
       curDecoder = new VideoDecoder({
         output: function (frame) { onTileOutput(frame, decoded); },
         error: function (e) {
-          console.error("VideoDecoder error [format=" + triedFormat + "] tile " + decoded + ":", e);
-          if (triedFormat === 0) {
-            console.log("Trying format 1: raw+desc...");
-            decoded = 0;
-            decodedFrames = new Array(tileCount);
-            tryConfigureAndDecode(1);
-          } else if (triedFormat === 1) {
-            console.log("Trying format 2: raw+desc+levelFix...");
-            decoded = 0;
-            decodedFrames = new Array(tileCount);
-            tryConfigureAndDecode(2);
-          } else {
-            previewMsg.textContent = "Decode error: " + (e.message || e);
-          }
+          console.error("VideoDecoder error tile " + decoded + ":", e);
+          previewMsg.textContent = "HEVC decode failed. Try Safari for HEIC preview.";
         }
       });
 
-      var cfg = { codec: codecStr, codedWidth: outW || 1920, codedHeight: outH || 1080 };
-
-      // 调试：看第一个 tile 的原始数据
-      var t0raw = tiles[0].raw;
-      var t0ann = tiles[0].annexb;
-      var hex = function(arr, n) { return Array.from(arr.slice(0, n)).map(function(b){return ('0'+b.toString(16)).slice(-2)}).join(' '); };
-      console.log("tile[0] raw("+t0raw.length+") first 20:", hex(t0raw, 20));
-      console.log("tile[0] annexb("+t0ann.length+") first 20:", hex(t0ann, 20));
-      // 检查 hvcC description
-      var desc = tiles[0].description;
-      console.log("hvcC desc[0..2]:", desc[0], desc[1].toString(2), "level_idc:", desc[12]);
-      // 检查 annexb 里第一个 NAL type
-      if (t0ann[0]===0 && t0ann[1]===0 && t0ann[2]===0 && t0ann[3]===1) {
-        console.log("annexb first NAL type:", t0ann[4] & 0x3F, "(32=VPS,33=SPS,34=PPS,19=IDR_W,20=IDR_N,39=PREFIX_SEI)");
-      }
-
-      if (format === 0) {
-        console.log("Format 0: annexb, no desc");
-      } else if (format === 1) {
-        cfg.description = tiles[0].description;
-        console.log("Format 1: raw+desc, desc=" + tiles[0].description.length);
-      } else {
-        var descCopy = new Uint8Array(tiles[0].description);
-        descCopy[12] = 153;
-        cfg.description = descCopy;
-        console.log("Format 2: raw+desc+levelFix 5.1");
-      }
-
-      try {
-        curDecoder.configure(cfg);
-        console.log("configure OK, starting decode...");
-      } catch(e) {
-        console.error("configure failed:", e);
-        previewMsg.textContent = "Configure error: " + e.message;
-        return;
-      }
+      curDecoder.configure({
+        codec: codecStr,
+        codedWidth: tw,
+        codedHeight: th,
+        description: tiles[0].description
+      });
 
       decodeOne(0);
     }
-
-    tryConfigureAndDecode(0);
   }
 
   function previewFrame(sliceIndex) {
