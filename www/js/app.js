@@ -732,6 +732,7 @@ timeline.addEventListener("click", function (e) {
         }));
         play.feedFrame = fi;
       } catch (err) {
+        console.error("[feedFrames error]", err.message, "stack=", new Error().stack);
         previewMsg.textContent = "Decode error: " + err.message;
         stopPlayback();
         return;
@@ -760,6 +761,7 @@ timeline.addEventListener("click", function (e) {
       play.decoder = new VideoDecoder({
         output: function (frame) { play.frames[frame.timestamp] = frame; },
         error: function (err) {
+          console.error("[VideoDecoder error]", err.message, "stack=", new Error().stack);
           previewMsg.textContent = "Decode error: " + err.message;
           stopPlayback();
         }
@@ -1007,24 +1009,33 @@ timeline.addEventListener("click", function (e) {
   }
 
   function previewFrame(sliceIndex) {
+    console.log("[previewFrame] sliceIndex=" + sliceIndex + " isImage=" + (currentData ? currentData.isImage : "no-data") + " heicDecoding=" + heicDecoding + " stack=" + (new Error().stack.split("\n")[1] || ""));
     if (!fileBytes || !currentData) return;
     if (currentData.isImage) {
+      console.log("[previewFrame] HEIC path entered");
       if (play.active) stopPlayback();
-      if (heicDecoding) return;
+      if (heicDecoding) { console.log("[previewFrame] heicDecoding=true, returning"); return; }
       heicDecoding = true;
       previewHint.textContent = "Decoding image...";
       previewMsg.textContent = "";
       if (currentHeicRawBytes) {
         if (typeof libheif !== "undefined") {
+          console.log("[previewFrame] libheif already loaded, calling decodeWithLibheif");
           decodeWithLibheif();
         } else if (currentImageBlob) {
+          console.log("[previewFrame] trying createImageBitmap");
           createImageBitmap(currentImageBlob).then(function (bmp) {
+            console.log("[previewFrame] createImageBitmap success " + bmp.width + "x" + bmp.height);
             drawVideoFrame(bmp);
             previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
             previewMsg.textContent = "";
             heicDecoding = false;
-          }).catch(function () { loadAndDecodeHeic(); });
+          }).catch(function (e) {
+            console.log("[previewFrame] createImageBitmap failed, loading libheif. Error:", e && e.message);
+            loadAndDecodeHeic();
+          });
         } else {
+          console.log("[previewFrame] no currentImageBlob, loading libheif");
           loadAndDecodeHeic();
         }
       } else {
@@ -1033,6 +1044,7 @@ timeline.addEventListener("click", function (e) {
       }
       return;
     }
+    console.log("[previewFrame] VIDEO path entered (isImage=false)");
     heicDecoding = false;
     if (!timeline._slices) return;
     if (currentCodec === "vvc") {
