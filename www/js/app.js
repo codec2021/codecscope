@@ -1110,6 +1110,20 @@ timeline.addEventListener("click", function (e) {
 
       var cfg = { codec: codecStr, codedWidth: outW || 1920, codedHeight: outH || 1080 };
 
+      // 调试：看第一个 tile 的原始数据
+      var t0raw = tiles[0].raw;
+      var t0ann = tiles[0].annexb;
+      var hex = function(arr, n) { return Array.from(arr.slice(0, n)).map(function(b){return ('0'+b.toString(16)).slice(-2)}).join(' '); };
+      console.log("tile[0] raw("+t0raw.length+") first 20:", hex(t0raw, 20));
+      console.log("tile[0] annexb("+t0ann.length+") first 20:", hex(t0ann, 20));
+      // 检查 hvcC description
+      var desc = tiles[0].description;
+      console.log("hvcC desc[0..2]:", desc[0], desc[1].toString(2), "level_idc:", desc[12]);
+      // 检查 annexb 里第一个 NAL type
+      if (t0ann[0]===0 && t0ann[1]===0 && t0ann[2]===0 && t0ann[3]===1) {
+        console.log("annexb first NAL type:", t0ann[4] & 0x3F, "(32=VPS,33=SPS,34=PPS,19=IDR_W,20=IDR_N,39=PREFIX_SEI)");
+      }
+
       if (format === 0) {
         console.log("Format 0: annexb, no desc");
       } else if (format === 1) {
