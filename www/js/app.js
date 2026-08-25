@@ -10,6 +10,7 @@
   var currentNalLengthSize = 4;  // description 存在时的 NAL 长度前缀字节数
   var currentContainerInfo = null; // MP4 容器级信息（General/Video/Audio/Other）
   var currentImageBlob = null;     // HEIC/HEIF 原始文件 Blob（用于原生解码预览）
+  var currentHeicRawBytes = null;  // HEIC 原始字节（用于 libheif 解码）
   var selectedIndex = -1;
 
   var statusEl = document.getElementById("status");
@@ -958,209 +959,58 @@ timeline.addEventListener("click", function (e) {
     previewCanvas.height = Math.max(1, Math.round(h * scale));
   }
 
-  // 从 hvcC description 字节推导 codec string（hvc1.xxx）
-  function deriveHvc1CodecString(desc) {
-    if (!desc || desc.length < 13) return null;
-    function rev32(v) { var r = 0; for (var i = 0; i < 32; i++) { r = (r << 1) | (v & 1); v >>>= 1; } return r >>> 0; }
-    var b1 = desc[1];
-    var space = (b1 >> 6) & 3, tier = (b1 >> 5) & 1, profileIdc = b1 & 0x1F;
-    var compat = (desc[2] << 24) | (desc[3] << 16) | (desc[4] << 8) | desc[5];
-    var level = desc[12];
-    var spaceChar = ["", "A", "B", "C"][space];
-    var compatHex = rev32(compat).toString(16).toUpperCase();
-    var tierChar = tier ? "H" : "L";
-    var cBits = "", started = false;
-    for (var cb = 47; cb >= 0; cb--) {
-      var bi2 = 6 + (cb >> 3), bit = (desc[bi2] >> (cb & 7)) & 1;
-      if (bit || started) { started = true; cBits += bit; }
-    }
-    var cHex = parseInt(cBits || "0", 2).toString(16).toUpperCase();
-    return "hvc1." + spaceChar + profileIdc + "." + compatHex + "." + tierChar + level + "." + cHex;
+  // ---------- HEIC libheif 解码 ----------
+  function loadAndDecodeHeic() {
+    if (typeof libheif !== "undefined") { decodeWithLibheif(); return; }
+    previewMsg.textContent = "Loading HEIC decoder...";
+    var s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/libheif-js@1.18.2/dist/libheif.min.js";
+    s.onload = function () { decodeWithLibheif(); };
+    s.onerror = function () { previewMsg.textContent = "Failed to load HEIC decoder library"; };
+    document.head.appendChild(s);
   }
 
-  function previewHeicFallback() {
-    if (!("VideoDecoder" in window)) {
-      previewMsg.textContent = "Browser does not support WebCodecs HEVC decoding";
-      return;
-    }
-    if (play.active) stopPlayback();
-
-    var tiles = currentData.tiles;
-
-    // ---- 单 tile / 无 tiles：走原有 play decoder 逻辑 ----
-    if (!tiles || tiles.length <= 1) {
-      initPlayDecoder(function () {
-        feedFrames(0);
-        var waited = 0;
-        var check = setInterval(function () {
-          var frame = play.frames[0];
-          if (frame) {
-            clearInterval(check);
-            drawVideoFrame(frame);
-            previewHint.textContent = "Image " + frame.displayWidth + " x " + frame.displayHeight;
-            return;
-          }
-          waited += 10;
-          if (waited > PLAY_PREVIEW_TIMEOUT) {
-            clearInterval(check);
-            if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
-          }
-        }, 10);
+  function decodeWithLibheif() {
+    try {
+      var decoder = new libheif.HeifDecoder();
+      var results = decoder.decode(currentHeicRawBytes.buffer);
+      if (!results || results.length === 0) { previewMsg.textContent = "HEIC decode failed"; return; }
+      var image = results[0];
+      var w = image.get_width(), h = image.get_height();
+      var tmpCanvas = document.createElement("canvas");
+      tmpCanvas.width = w; tmpCanvas.height = h;
+      var tmpCtx = tmpCanvas.getContext("2d");
+      image.display(tmpCtx, function () {
+        var canvas = previewCanvas;
+        var maxW = previewView.clientWidth - 32, maxH = 480;
+        if (maxW < 160) maxW = 160;
+        var scale = Math.min(1, maxW / w, maxH / h);
+        canvas.width = Math.max(1, Math.round(w * scale));
+        canvas.height = Math.max(1, Math.round(h * scale));
+        canvas.getContext("2d").drawImage(tmpCanvas, 0, 0, canvas.width, canvas.height);
+        previewHint.textContent = "Image " + w + " x " + h;
+        previewMsg.textContent = "";
+        previewCanvasTouched = true;
       });
-      return;
-    }
-
-    // ---- 多 tile 拼接 ----
-    var tileCount = tiles.length;
-    previewMsg.textContent = "Decoding " + tileCount + " tiles...";
-    previewHint.textContent = "";
-
-    var codecStr = deriveHvc1CodecString(tiles[0].description);
-    if (!codecStr) { previewMsg.textContent = "Cannot determine codec"; return; }
-
-    var decodedFrames = new Array(tileCount);
-    var decoded = 0;
-    var tileW = 0, tileH = 0;
-    var outW = currentData.hdr.picWidth || 0;
-    var outH = currentData.hdr.picHeight || 0;
-    var rows = 0, cols = 0;
-
-    function onTileOutput(frame, idx) {
-      decodedFrames[idx] = frame;
-      decoded++;
-      previewMsg.textContent = "Decoded " + decoded + "/" + tileCount;
-
-      if (idx === 0) {
-        tileW = frame.displayWidth || frame.codedWidth;
-        tileH = frame.displayHeight || frame.codedHeight;
-        if (!outW || !outH) { outW = tileW; outH = tileH; }
-        cols = Math.max(1, Math.round(outW / tileW));
-        rows = Math.max(1, Math.round(outH / tileH));
-        // 修正：确保 rows*cols >= tileCount
-        while (rows * cols < tileCount) { if (cols <= rows) cols++; else rows++; }
-      }
-
-      if (decoded >= tileCount) stitchAndDisplay();
-      else decodeOne(decoded);
-    }
-
-    function decodeOne(idx) {
-      if (idx >= tileCount) return;
-      var tile = tiles[idx];
-      var chunk = new EncodedVideoChunk({ type: "key", timestamp: idx * 1000, data: tile.raw });
-      curDecoder.decode(chunk);
-    }
-
-    function stitchAndDisplay() {
-      var canvas = previewCanvas;
-      var maxW = previewView.clientWidth - 32;
-      var maxH = 480;
-      if (maxW < 160) maxW = 160;
-      var scale = Math.min(1, maxW / outW, maxH / outH);
-      canvas.width = Math.max(1, Math.round(outW * scale));
-      canvas.height = Math.max(1, Math.round(outH * scale));
-      var ctx = canvas.getContext("2d");
-      var sx = canvas.width / outW, sy = canvas.height / outH;
-
-      for (var r = 0; r < rows; r++) {
-        for (var c = 0; c < cols; c++) {
-          var fi = r * cols + c;
-          if (fi < decodedFrames.length && decodedFrames[fi]) {
-            var fr = decodedFrames[fi];
-            var fw = fr.displayWidth || fr.codedWidth;
-            var fh = fr.displayHeight || fr.codedHeight;
-            ctx.drawImage(fr, c * tileW * sx, r * tileH * sy, fw * sx, fh * sy);
-          }
-        }
-      }
-
-      previewHint.textContent = "Image " + outW + " x " + outH + " (" + tileCount + " tiles stitched)";
-      previewMsg.textContent = "";
-      previewCanvasTouched = true;
-
-      for (var i = 0; i < decodedFrames.length; i++) if (decodedFrames[i]) decodedFrames[i].close();
-    }
-
-    // 估算 tile 尺寸（用于 VideoDecoder codedWidth/codedHeight）
-    var tileW = 0, tileH = 0;
-    if (currentData.grid) {
-      tileW = Math.round(outW / currentData.grid.cols);
-      tileH = Math.round(outH / currentData.grid.rows);
-    } else if (tileCount > 1) {
-      // 从 tile 数推算最接近正方形的 grid
-      var bestR = 1, bestC = tileCount, bestErr = Infinity;
-      for (var r = 1; r <= tileCount; r++) {
-        if (tileCount % r !== 0) continue;
-        var c = tileCount / r;
-        var err = Math.abs((outW / c) / (outH / r) - 1);
-        if (err < bestErr) { bestErr = err; bestR = r; bestC = c; }
-      }
-      tileW = Math.round(outW / bestC);
-      tileH = Math.round(outH / bestR);
-    } else {
-      tileW = outW || 64;
-      tileH = outH || 64;
-    }
-    if (tileW < 16) tileW = 16;
-    if (tileH < 16) tileH = 16;
-
-    // 先检测浏览器是否支持该 HEVC 配置
-    var testCfg = { codec: codecStr, codedWidth: tileW, codedHeight: tileH, description: tiles[0].description };
-    if (typeof VideoDecoder.isConfigSupported === "function") {
-      VideoDecoder.isConfigSupported(testCfg).then(function (result) {
-        if (result.supported) {
-          startTileDecode(tileW, tileH);
-        } else {
-          // 尝试不带 description
-          VideoDecoder.isConfigSupported({ codec: codecStr, codedWidth: tileW, codedHeight: tileH }).then(function (r2) {
-            if (r2.supported) startTileDecode(tileW, tileH);
-            else previewMsg.textContent = "HEVC decoding not supported in this browser. Try Safari.";
-          }).catch(function () {
-            previewMsg.textContent = "HEVC decoding not supported in this browser. Try Safari.";
-          });
-        }
-      }).catch(function () {
-        startTileDecode(tileW, tileH);
-      });
-    } else {
-      startTileDecode(tileW, tileH);
-    }
-
-    var curDecoder = null;
-
-    function startTileDecode(tw, th) {
-      curDecoder = new VideoDecoder({
-        output: function (frame) { onTileOutput(frame, decoded); },
-        error: function (e) {
-          console.error("VideoDecoder error tile " + decoded + ":", e);
-          previewMsg.textContent = "HEVC decode failed. Try Safari for HEIC preview.";
-        }
-      });
-
-      curDecoder.configure({
-        codec: codecStr,
-        codedWidth: tw,
-        codedHeight: th,
-        description: tiles[0].description
-      });
-
-      decodeOne(0);
+    } catch (e) {
+      console.error("libheif error:", e);
+      previewMsg.textContent = "HEIC decode error: " + e.message;
     }
   }
 
   function previewFrame(sliceIndex) {
     if (!fileBytes || !currentData) return;
-    // HEIC/HEIF 静态图像：优先 createImageBitmap 完整图，失败后 VideoDecoder 解码 IDR tile
-    if (currentData.isImage && currentImageBlob) {
+    if (currentData.isImage && currentHeicRawBytes) {
       previewHint.textContent = "Decoding image...";
       previewMsg.textContent = "";
-      createImageBitmap(currentImageBlob).then(function (bmp) {
-        drawVideoFrame(bmp);
-        previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
-      }).catch(function () {
-        // 回退：用 VideoDecoder 解码提取的 IDR 数据（首个 tile）
-        previewHeicFallback();
-      });
+      if (currentImageBlob) {
+        createImageBitmap(currentImageBlob).then(function (bmp) {
+          drawVideoFrame(bmp);
+          previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
+        }).catch(function () { loadAndDecodeHeic(); });
+      } else {
+        loadAndDecodeHeic();
+      }
       return;
     }
     if (!timeline._slices) return;
@@ -1365,6 +1215,7 @@ timeline.addEventListener("click", function (e) {
           currentDescription = heic.description || null;
           currentNalLengthSize = heic.nalLengthSize || 4;
           currentImageBlob = new Blob([rawBytes], { type: "image/heic" });
+          currentHeicRawBytes = rawBytes;
           isImage = true;
           imageW = heic.picWidth || 0;
           imageH = heic.picHeight || 0;
@@ -1455,6 +1306,7 @@ timeline.addEventListener("click", function (e) {
     currentNalLengthSize = 4;
     currentContainerInfo = null;
     currentImageBlob = null;
+    currentHeicRawBytes = null;
     selectedIndex = -1;
     timeline._base = null;
     timeline._baseBarW = null;

@@ -443,11 +443,6 @@
       grid = { rows: rows, cols: cols, outputWidth: outW, outputHeight: outH };
     }
 
-    console.log("parseHeic: tiles=" + tiles.length + " targetIds=" + targetIds.length + " grid=" + JSON.stringify(grid));
-    for (var li = 0; li < tiles.length; li++) {
-      console.log("  tile[" + li + "] annexb=" + tiles[li].annexb.length + " desc=" + tiles[li].description.length);
-    }
-
     return {
       codec: "hevc",
       annexb: firstTileAnnexb || new Uint8Array(0),
