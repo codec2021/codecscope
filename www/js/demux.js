@@ -390,6 +390,7 @@
       // 读取 extent 里所有 length-prefixed NAL
       var tileNals = [];
       var pos = dataOff, endPos = dataOff + ext.length;
+      var rawBytes = d.subarray(dataOff, endPos); // 原始 length-prefixed 数据
       while (pos + 4 <= endPos) {
         var nalLen = readU32(d, pos); pos += 4;
         if (nalLen > 0 && pos + nalLen <= endPos) {
@@ -419,7 +420,7 @@
         annexb.set(tileNals[tq4], tw); tw += tileNals[tq4].length;
       }
 
-      tiles.push({ annexb: annexb, description: tDesc });
+      tiles.push({ annexb: annexb, raw: rawBytes, description: tDesc });
       if (!firstTileAnnexb) firstTileAnnexb = annexb;
     }
 

@@ -1047,7 +1047,8 @@ timeline.addEventListener("click", function (e) {
     function decodeOne(idx) {
       if (idx >= tileCount) return;
       var tile = tiles[idx];
-      var chunk = new EncodedVideoChunk({ type: "key", timestamp: idx * 1000, data: tile.annexb });
+      var data = (triedFormat === 0) ? tile.annexb : tile.raw;
+      var chunk = new EncodedVideoChunk({ type: "key", timestamp: idx * 1000, data: data });
       curDecoder.decode(chunk);
     }
 
@@ -1081,21 +1082,60 @@ timeline.addEventListener("click", function (e) {
       for (var i = 0; i < decodedFrames.length; i++) if (decodedFrames[i]) decodedFrames[i].close();
     }
 
-    var curDecoder = new VideoDecoder({
-      output: function (frame) { onTileOutput(frame, decoded); },
-      error: function (e) {
-        console.error("VideoDecoder error tile " + decoded + ":", e);
-        previewMsg.textContent = "Decode error at tile " + decoded + ": " + (e.message || e);
+    var curDecoder = null;
+    var triedFormat = 0; // 0=annexb no desc, 1=raw+desc, 2=raw+desc+levelFix
+
+    function tryConfigureAndDecode(format) {
+      triedFormat = format;
+      if (curDecoder) { try { curDecoder.close(); } catch(e){} }
+      curDecoder = new VideoDecoder({
+        output: function (frame) { onTileOutput(frame, decoded); },
+        error: function (e) {
+          console.error("VideoDecoder error [format=" + triedFormat + "] tile " + decoded + ":", e);
+          if (triedFormat === 0) {
+            console.log("Trying format 1: raw+desc...");
+            decoded = 0;
+            decodedFrames = new Array(tileCount);
+            tryConfigureAndDecode(1);
+          } else if (triedFormat === 1) {
+            console.log("Trying format 2: raw+desc+levelFix...");
+            decoded = 0;
+            decodedFrames = new Array(tileCount);
+            tryConfigureAndDecode(2);
+          } else {
+            previewMsg.textContent = "Decode error: " + (e.message || e);
+          }
+        }
+      });
+
+      var cfg = { codec: codecStr, codedWidth: outW || 1920, codedHeight: outH || 1080 };
+
+      if (format === 0) {
+        // Annex B data, no description
+        console.log("Format 0: annexb, no desc");
+      } else if (format === 1) {
+        // Raw length-prefixed data + description
+        cfg.description = tiles[0].description;
+        console.log("Format 1: raw+desc, desc=" + tiles[0].description.length);
+      } else {
+        // Raw + desc with level capped to 5.1 (153)
+        var descCopy = new Uint8Array(tiles[0].description);
+        descCopy[12] = 153; // cap level to 5.1
+        cfg.description = descCopy;
+        console.log("Format 2: raw+desc+levelFix 5.1");
       }
-    });
-    console.log("HEIC tiles:", tileCount, "codec:", codecStr, "desc:", tiles[0].description.length, "bytes");
-    console.log("tile[0] annexb:", tiles[0].annexb.length, "bytes, first 16:", Array.from(tiles[0].annexb.slice(0, 16)));
-    curDecoder.configure({
-      codec: codecStr,
-      codedWidth: outW || 1920,
-      codedHeight: outH || 1080,
-      description: tiles[0].description
-    });
+
+      try {
+        curDecoder.configure(cfg);
+        console.log("configure OK, starting decode...");
+      } catch(e) {
+        console.error("configure failed:", e);
+        previewMsg.textContent = "Configure error: " + e.message;
+        return;
+      }
+
+    tryConfigureAndDecode(0);
+    }
 
     decodeOne(0);
   }
