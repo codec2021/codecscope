@@ -1083,8 +1083,13 @@ timeline.addEventListener("click", function (e) {
 
     var curDecoder = new VideoDecoder({
       output: function (frame) { onTileOutput(frame, decoded); },
-      error: function (e) { previewMsg.textContent = "Decode error: " + e.message; }
+      error: function (e) {
+        console.error("VideoDecoder error tile " + decoded + ":", e);
+        previewMsg.textContent = "Decode error at tile " + decoded + ": " + (e.message || e);
+      }
     });
+    console.log("HEIC tiles:", tileCount, "codec:", codecStr, "desc:", tiles[0].description.length, "bytes");
+    console.log("tile[0] annexb:", tiles[0].annexb.length, "bytes, first 16:", Array.from(tiles[0].annexb.slice(0, 16)));
     curDecoder.configure({
       codec: codecStr,
       codedWidth: outW || 1920,
