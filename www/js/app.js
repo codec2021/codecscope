@@ -1000,16 +1000,20 @@ timeline.addEventListener("click", function (e) {
 
   function previewFrame(sliceIndex) {
     if (!fileBytes || !currentData) return;
-    if (currentData.isImage && currentHeicRawBytes) {
+    if (currentData.isImage) {
       previewHint.textContent = "Decoding image...";
       previewMsg.textContent = "";
-      if (currentImageBlob) {
-        createImageBitmap(currentImageBlob).then(function (bmp) {
-          drawVideoFrame(bmp);
-          previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
-        }).catch(function () { loadAndDecodeHeic(); });
-      } else {
-        loadAndDecodeHeic();
+      if (currentHeicRawBytes) {
+        if (typeof libheif !== "undefined") {
+          decodeWithLibheif();
+        } else if (currentImageBlob) {
+          createImageBitmap(currentImageBlob).then(function (bmp) {
+            drawVideoFrame(bmp);
+            previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
+          }).catch(function () { loadAndDecodeHeic(); });
+        } else {
+          loadAndDecodeHeic();
+        }
       }
       return;
     }
