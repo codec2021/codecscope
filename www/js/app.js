@@ -979,14 +979,13 @@ timeline.addEventListener("click", function (e) {
 
   function initLibheif() {
     try {
-      libheif().then(function (module) {
-        libheifModule = module;
-        decodeWithLibheif();
-      }).catch(function (e) {
-        console.error("libheif init error:", e);
-        previewMsg.textContent = "HEIC decoder init failed: " + e.message;
+      libheifModule = libheif();
+      if (!libheifModule || !libheifModule.HeifDecoder) {
+        previewMsg.textContent = "HEIC decoder init failed: no HeifDecoder";
         heicDecoding = false;
-      });
+        return;
+      }
+      decodeWithLibheif();
     } catch (e) {
       console.error("libheif init error:", e);
       previewMsg.textContent = "HEIC decoder init failed: " + e.message;
