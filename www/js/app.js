@@ -732,7 +732,6 @@ timeline.addEventListener("click", function (e) {
         }));
         play.feedFrame = fi;
       } catch (err) {
-        console.error("[feedFrames error]", err.message, "stack=", new Error().stack);
         previewMsg.textContent = "Decode error: " + err.message;
         stopPlayback();
         return;
@@ -743,7 +742,6 @@ timeline.addEventListener("click", function (e) {
   function initPlayDecoder(done) {
     var cs = codecString();
     if (!cs) { previewMsg.textContent = "Unable to determine codec string"; return; }
-    console.log("[initPlayDecoder] cs=" + cs + " isImage=" + (currentData ? currentData.isImage : "?") + " stack=", new Error().stack.split("\n").slice(1,4).join(" | "));
     var probeCfg = { codec: cs };
     if (currentDescription) probeCfg.description = currentDescription;
     VideoDecoder.isConfigSupported(probeCfg).then(function (support) {
@@ -751,7 +749,7 @@ timeline.addEventListener("click", function (e) {
         previewMsg.textContent = "Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : "");
         return;
       }
-      if (play.decoder) { try { play.decoder.close(); } catch (e) {} }
+      if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
       for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
       play.frames = {};
       play.feedFrame = -1;
@@ -762,9 +760,7 @@ timeline.addEventListener("click", function (e) {
       play.decoder = new VideoDecoder({
         output: function (frame) { play.frames[frame.timestamp] = frame; },
         error: function (err) {
-          var isImg = currentData && currentData.isImage;
-          console.error("[VideoDecoder error]", err.message, "isImage=" + isImg, "decoder===play.decoder=" + (play.decoder === this), "stack=", new Error().stack);
-          if (isImg) return;
+          if (play.decoder !== this) return;
           previewMsg.textContent = "Decode error: " + err.message;
           stopPlayback();
         }
@@ -800,6 +796,7 @@ timeline.addEventListener("click", function (e) {
 
   function startPlayback() {
     if (play.active) { stopPlayback(); return; }
+    if (currentData && currentData.isImage) { previewMsg.textContent = "Image files cannot be played as video"; return; }
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
     var fi = 0;
@@ -971,7 +968,7 @@ timeline.addEventListener("click", function (e) {
     if (typeof libheif !== "undefined") { decodeWithLibheif(); return; }
     previewMsg.textContent = "Loading HEIC decoder...";
     var s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/libheif-js@1.18.2/dist/libheif.min.js";
+    s.src = "js/libheif.min.js";
     s.onload = function () { decodeWithLibheif(); };
     s.onerror = function () { previewMsg.textContent = "Failed to load HEIC decoder library"; heicDecoding = false; };
     document.head.appendChild(s);
@@ -1012,36 +1009,27 @@ timeline.addEventListener("click", function (e) {
   }
 
   function previewFrame(sliceIndex) {
-    console.log("[previewFrame] sliceIndex=" + sliceIndex + " isImage=" + (currentData ? currentData.isImage : "no-data") + " heicDecoding=" + heicDecoding + " stack=" + (new Error().stack.split("\n")[1] || ""));
     if (!fileBytes || !currentData) return;
     if (currentData.isImage) {
-      console.log("[previewFrame] HEIC path entered");
       if (play.active) stopPlayback();
       if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
       for (var fk in play.frames) { try { play.frames[fk].close(); } catch (e) {} }
       play.frames = {};
-      if (heicDecoding) { console.log("[previewFrame] heicDecoding=true, returning"); return; }
+      if (heicDecoding) return;
       heicDecoding = true;
       previewHint.textContent = "Decoding image...";
       previewMsg.textContent = "";
       if (currentHeicRawBytes) {
         if (typeof libheif !== "undefined") {
-          console.log("[previewFrame] libheif already loaded, calling decodeWithLibheif");
           decodeWithLibheif();
         } else if (currentImageBlob) {
-          console.log("[previewFrame] trying createImageBitmap");
           createImageBitmap(currentImageBlob).then(function (bmp) {
-            console.log("[previewFrame] createImageBitmap success " + bmp.width + "x" + bmp.height);
             drawVideoFrame(bmp);
             previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
             previewMsg.textContent = "";
             heicDecoding = false;
-          }).catch(function (e) {
-            console.log("[previewFrame] createImageBitmap failed, loading libheif. Error:", e && e.message);
-            loadAndDecodeHeic();
-          });
+          }).catch(function () { loadAndDecodeHeic(); });
         } else {
-          console.log("[previewFrame] no currentImageBlob, loading libheif");
           loadAndDecodeHeic();
         }
       } else {
@@ -1050,7 +1038,6 @@ timeline.addEventListener("click", function (e) {
       }
       return;
     }
-    console.log("[previewFrame] VIDEO path entered (isImage=false)");
     heicDecoding = false;
     if (!timeline._slices) return;
     if (currentCodec === "vvc") {
@@ -1214,6 +1201,7 @@ timeline.addEventListener("click", function (e) {
 
   function stepFrame(delta) {
     if (play.active) stopPlayback();
+    if (currentData && currentData.isImage) return;
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
     var fi = 0;
