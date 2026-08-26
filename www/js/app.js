@@ -964,19 +964,39 @@ timeline.addEventListener("click", function (e) {
   // ---------- HEIC libheif 解码 ----------
   var heicDecoding = false;
 
+  var libheifModule = null;
+
   function loadAndDecodeHeic() {
-    if (typeof libheif !== "undefined") { decodeWithLibheif(); return; }
+    if (libheifModule) { decodeWithLibheif(); return; }
+    if (typeof libheif === "function") { initLibheif(); return; }
     previewMsg.textContent = "Loading HEIC decoder...";
     var s = document.createElement("script");
     s.src = "js/libheif.min.js";
-    s.onload = function () { decodeWithLibheif(); };
+    s.onload = function () { initLibheif(); };
     s.onerror = function () { previewMsg.textContent = "Failed to load HEIC decoder library"; heicDecoding = false; };
     document.head.appendChild(s);
   }
 
+  function initLibheif() {
+    try {
+      libheif().then(function (module) {
+        libheifModule = module;
+        decodeWithLibheif();
+      }).catch(function (e) {
+        console.error("libheif init error:", e);
+        previewMsg.textContent = "HEIC decoder init failed: " + e.message;
+        heicDecoding = false;
+      });
+    } catch (e) {
+      console.error("libheif init error:", e);
+      previewMsg.textContent = "HEIC decoder init failed: " + e.message;
+      heicDecoding = false;
+    }
+  }
+
   function decodeWithLibheif() {
     try {
-      var decoder = new libheif.HeifDecoder();
+      var decoder = new libheifModule.HeifDecoder();
       var results = decoder.decode(currentHeicRawBytes.buffer);
       if (!results || results.length === 0) { previewMsg.textContent = "HEIC decode failed"; heicDecoding = false; return; }
       var image = results[0];
@@ -984,7 +1004,13 @@ timeline.addEventListener("click", function (e) {
       var tmpCanvas = document.createElement("canvas");
       tmpCanvas.width = w; tmpCanvas.height = h;
       var tmpCtx = tmpCanvas.getContext("2d");
-      image.display(tmpCtx, function () {
+      image.display(tmpCtx, function (ctx) {
+        if (!ctx) {
+          console.error("libheif display returned null");
+          previewMsg.textContent = "HEIC render failed";
+          heicDecoding = false;
+          return;
+        }
         var canvas = previewCanvas;
         var maxW = previewView.clientWidth - 32, maxH = 480;
         if (maxW < 160) maxW = 160;
@@ -995,10 +1021,6 @@ timeline.addEventListener("click", function (e) {
         previewHint.textContent = "Image " + w + " x " + h;
         previewMsg.textContent = "";
         previewCanvasTouched = true;
-        heicDecoding = false;
-      }, function (err) {
-        console.error("libheif display error:", err);
-        previewMsg.textContent = "HEIC render error: " + (err && err.message ? err.message : err);
         heicDecoding = false;
       });
     } catch (e) {
