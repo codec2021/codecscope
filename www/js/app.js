@@ -996,7 +996,7 @@ timeline.addEventListener("click", function (e) {
   function decodeWithLibheif() {
     try {
       var decoder = new libheifModule.HeifDecoder();
-      var results = decoder.decode(currentHeicRawBytes.buffer);
+      var results = decoder.decode(currentHeicRawBytes);
       if (!results || results.length === 0) { previewMsg.textContent = "HEIC decode failed"; heicDecoding = false; return; }
       var image = results[0];
       var w = image.get_width(), h = image.get_height();
