@@ -743,6 +743,7 @@ timeline.addEventListener("click", function (e) {
   function initPlayDecoder(done) {
     var cs = codecString();
     if (!cs) { previewMsg.textContent = "Unable to determine codec string"; return; }
+    console.log("[initPlayDecoder] cs=" + cs + " isImage=" + (currentData ? currentData.isImage : "?") + " stack=", new Error().stack.split("\n").slice(1,4).join(" | "));
     var probeCfg = { codec: cs };
     if (currentDescription) probeCfg.description = currentDescription;
     VideoDecoder.isConfigSupported(probeCfg).then(function (support) {
@@ -761,7 +762,9 @@ timeline.addEventListener("click", function (e) {
       play.decoder = new VideoDecoder({
         output: function (frame) { play.frames[frame.timestamp] = frame; },
         error: function (err) {
-          console.error("[VideoDecoder error]", err.message, "stack=", new Error().stack);
+          var isImg = currentData && currentData.isImage;
+          console.error("[VideoDecoder error]", err.message, "isImage=" + isImg, "decoder===play.decoder=" + (play.decoder === this), "stack=", new Error().stack);
+          if (isImg) return;
           previewMsg.textContent = "Decode error: " + err.message;
           stopPlayback();
         }
@@ -1014,6 +1017,9 @@ timeline.addEventListener("click", function (e) {
     if (currentData.isImage) {
       console.log("[previewFrame] HEIC path entered");
       if (play.active) stopPlayback();
+      if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
+      for (var fk in play.frames) { try { play.frames[fk].close(); } catch (e) {} }
+      play.frames = {};
       if (heicDecoding) { console.log("[previewFrame] heicDecoding=true, returning"); return; }
       heicDecoding = true;
       previewHint.textContent = "Decoding image...";
