@@ -998,7 +998,18 @@ timeline.addEventListener("click", function (e) {
       var decoder = new libheifModule.HeifDecoder();
       var results = decoder.decode(currentHeicRawBytes);
       if (!results || results.length === 0) { previewMsg.textContent = "HEIC decode failed"; heicDecoding = false; return; }
-      var image = results[0];
+      var image = null;
+      for (var i = 0; i < results.length; i++) {
+        var img = results[i];
+        try {
+          if (typeof img.is_grid === "function" && img.is_grid()) continue;
+          if (typeof img.get_width === "function" && typeof img.get_height === "function" && img.get_width() > 0 && img.get_height() > 0) {
+            image = img;
+            break;
+          }
+        } catch (e) { continue; }
+      }
+      if (!image) image = results[0];
       var w = image.get_width(), h = image.get_height();
       var tmpCanvas = document.createElement("canvas");
       tmpCanvas.width = w; tmpCanvas.height = h;
