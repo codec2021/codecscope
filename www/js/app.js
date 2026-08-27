@@ -796,7 +796,7 @@ timeline.addEventListener("click", function (e) {
 
   function startPlayback() {
     if (play.active) { stopPlayback(); return; }
-    if (currentData && currentData.isImage) { previewMsg.textContent = "Image files cannot be played as video"; return; }
+    if (currentData && currentData.isImage) { return; }
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
     var fi = 0;
@@ -1223,7 +1223,7 @@ timeline.addEventListener("click", function (e) {
   previewOrderBtn.addEventListener("click", function () {
     if (play.active) stopPlayback();
     play.displayOrder = !play.displayOrder;
-    previewOrderBtn.textContent = play.displayOrder ? "显示顺序" : "解码顺序";
+    previewOrderBtn.textContent = play.displayOrder ? "Display Order" : "Decode Order";
     previewOrderBtn.title = play.displayOrder ? "Play in display order (POC)" : "Play in decode order";
   });
 
