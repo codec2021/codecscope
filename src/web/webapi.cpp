@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdint>
+#include <exception>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
@@ -70,7 +71,18 @@ extern "C"
     g_parser -> addConsumer(g_webParser);
     g_parser -> addConsumer(g_profileAnalyzer);
 
-    g_parser -> process(data, size);
+    try
+    {
+      g_parser -> process(data, size);
+    }
+    catch(const std::exception &err)
+    {
+      return dupString(std::string("{\"error\":\"") + err.what() + "\"}");
+    }
+    catch(...)
+    {
+      return dupString(std::string("{\"error\":\"unknown parse error\"}"));
+    }
 
     return dupString(g_webParser -> serializeSummary());
   }
@@ -105,7 +117,18 @@ extern "C"
     g_avcWebParser -> setTotalSize(size);
 
     g_avcParser -> addConsumer(g_avcWebParser);
-    g_avcParser -> process(data, size);
+    try
+    {
+      g_avcParser -> process(data, size);
+    }
+    catch(const std::exception &err)
+    {
+      return dupString(std::string("{\"error\":\"") + err.what() + "\"}");
+    }
+    catch(...)
+    {
+      return dupString(std::string("{\"error\":\"unknown parse error\"}"));
+    }
 
     return dupString(g_avcWebParser -> serializeSummary());
   }
@@ -138,7 +161,18 @@ extern "C"
     g_vvcWebParser -> setTotalSize(size);
 
     g_vvcParser -> addConsumer(g_vvcWebParser);
-    g_vvcParser -> process(data, size);
+    try
+    {
+      g_vvcParser -> process(data, size);
+    }
+    catch(const std::exception &err)
+    {
+      return dupString(std::string("{\"error\":\"") + err.what() + "\"}");
+    }
+    catch(...)
+    {
+      return dupString(std::string("{\"error\":\"unknown parse error\"}"));
+    }
 
     return dupString(g_vvcWebParser -> serializeSummary());
   }

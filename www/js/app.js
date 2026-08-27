@@ -87,7 +87,9 @@
     var json = Module.UTF8ToString(outPtr);
     Module._hevc_free(outPtr);
 
-    return { codec: codec, data: JSON.parse(json) };
+    var data = JSON.parse(json);
+    if (data.error) throw new Error(data.error);
+    return { codec: codec, data: data };
   }
 
   function fetchNalSyntax(index) {
@@ -662,7 +664,8 @@ timeline.addEventListener("click", function (e) {
     for (var f = frameIndex; f >= 0; f--) {
       var sl = frames[f].slices;
       for (var k = 0; k < sl.length; k++) {
-        if (isKeyNal(currentData.nalus[timeline._slices[sl[k]].index].type)) return f;
+        var nal = currentData.nalus[timeline._slices[sl[k]].index];
+        if (nal && isKeyNal(nal.type)) return f;
       }
     }
     return -1;
@@ -672,7 +675,8 @@ timeline.addEventListener("click", function (e) {
     var frames = timeline._frames;
     var sl = frames[fi].slices;
     for (var k = 0; k < sl.length; k++) {
-      if (isKeyNal(currentData.nalus[timeline._slices[sl[k]].index].type)) return true;
+      var nal = currentData.nalus[timeline._slices[sl[k]].index];
+      if (nal && isKeyNal(nal.type)) return true;
     }
     return false;
   }
@@ -1371,6 +1375,12 @@ timeline.addEventListener("click", function (e) {
 
         setStatus("Parsed: " + currentCodec.toUpperCase() + ", " + currentData.nalus.length + " NAL units" + srcNote + ", " + (t1 - t0).toFixed(0) + " ms");
       } catch (err) {
+        currentData = null;
+        currentCodec = null;
+        fileBytes = null;
+        timeline._frames = null;
+        timeline._slices = null;
+        timeline._nalToSlice = null;
         setStatus("Parse error: " + err.message);
         console.error(err);
       }

@@ -73,6 +73,25 @@
       }
       trakStart += trakSize;
     }
+
+    // fMP4 支持：若 moov/stbl 样本表为空（样本在 moof+mdat 片段里），解析 fragment 追加
+    if (result && result.codec) {
+      var fragNals = parseFragmentNals(d);
+      if (fragNals.length > 0) {
+        var newTotal = result.annexb.length;
+        for (var f = 0; f < fragNals.length; f++) newTotal += fragNals[f].length + 4;
+        var newOut = new Uint8Array(newTotal);
+        newOut.set(result.annexb, 0);
+        var fw = result.annexb.length;
+        for (var f2 = 0; f2 < fragNals.length; f2++) {
+          newOut[fw] = 0; newOut[fw + 1] = 0; newOut[fw + 2] = 0; newOut[fw + 3] = 1;
+          fw += 4;
+          newOut.set(fragNals[f2], fw);
+          fw += fragNals[f2].length;
+        }
+        result.annexb = newOut;
+      }
+    }
     return result;
   }
 
@@ -209,6 +228,91 @@
       w += nalList[q2].length;
     }
     return { codec: codec, annexb: out, description: description, nalLengthSize: nalLengthSize };
+  }
+
+  function parseFragmentNals(d) {
+    // 解析 fragmented MP4 的 moof/traf/trun，提取 length-prefixed NAL（不含 start code）
+    var nals = [];
+    var i = 0;
+    while (i + 8 <= d.length) {
+      var moofSize = boxSize(d, i);
+      if (moofSize < 8 || i + moofSize > d.length) break;
+      if (fourCC(d, i + 4) !== "moof") { i += moofSize; continue; }
+
+      var moofEnd = i + moofSize;
+      var p = i + 8;
+      var baseDataOffset = -1;      // tfhd 里的绝对 base offset（-1 未设置）
+      var defaultSampleSize = 0;    // tfhd 的 default_sample_size
+      var runningOffset = -1;       // 无 data_offset 时的累积偏移
+
+      while (p + 8 <= moofEnd) {
+        var bsz = boxSize(d, p);
+        if (bsz < 8 || p + bsz > moofEnd) break;
+        if (fourCC(d, p + 4) !== "traf") { p += bsz; continue; }
+
+        var trafEnd = p + bsz;
+        var q = p + 8;
+        while (q + 8 <= trafEnd) {
+          var tsz = boxSize(d, q);
+          if (tsz < 8 || q + tsz > trafEnd) break;
+          var tt = fourCC(d, q + 4);
+
+          if (tt === "tfhd") {
+            var hflags = (d[q + 9] << 16) | (d[q + 10] << 8) | d[q + 11];
+            var r = q + 12;
+            r += 4; // track_ID
+            if (hflags & 1) { baseDataOffset = readU32(d, r) * 4294967296 + readU32(d, r + 4); r += 8; }
+            else if (hflags & 2) r += 4;
+            if (hflags & 8) r += 4;      // default_sample_duration
+            if (hflags & 0x10) { defaultSampleSize = readU32(d, r); r += 4; }
+            if (hflags & 0x20) r += 4;   // default_sample_flags
+          }
+          else if (tt === "trun") {
+            var tflags = (d[q + 9] << 16) | (d[q + 10] << 8) | d[q + 11];
+            var r = q + 12;
+            var sampleCount = readU32(d, r); r += 4;
+            var dataOffset = 0;
+            if (tflags & 1) { dataOffset = readU32(d, r); r += 4; }
+            if (tflags & 4) r += 4;      // first_sample_flags
+
+            var sampleOffset;
+            if (tflags & 1) {
+              sampleOffset = i + dataOffset;                 // 相对 moof 起始
+            } else if (baseDataOffset >= 0) {
+              sampleOffset = baseDataOffset + (runningOffset >= 0 ? runningOffset : 0);
+            } else {
+              sampleOffset = runningOffset;                  // 继续上一个 trun 末尾
+            }
+
+            for (var s = 0; s < sampleCount; s++) {
+              if (tflags & 0x100) r += 4;                    // sample_duration
+              var sampleSize = defaultSampleSize;
+              if (tflags & 0x200) { sampleSize = readU32(d, r); r += 4; }
+              if (tflags & 0x400) r += 4;                    // sample_flags
+              if (tflags & 0x800) r += 4;                    // composition_time_offset
+
+              if (sampleSize > 0 && sampleOffset >= 0 && sampleOffset + sampleSize <= d.length) {
+                var sample = d.subarray(sampleOffset, sampleOffset + sampleSize);
+                var p2 = 0;
+                while (p2 + 4 <= sample.length) {
+                  var nlen = readU32(sample, p2); p2 += 4;
+                  if (nlen < 0 || p2 + nlen > sample.length) break;
+                  nals.push(sample.subarray(p2, p2 + nlen));
+                  p2 += nlen;
+                }
+              }
+              sampleOffset += sampleSize;
+            }
+            runningOffset = sampleOffset;
+          }
+
+          q += tsz;
+        }
+        p += bsz;
+      }
+      i += moofSize;
+    }
+    return nals;
   }
 
   function isHeic(d) {
