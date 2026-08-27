@@ -137,6 +137,17 @@
     if (currentCodec === "vvc") return "VVC";
     return "?";
   }
+  function sampleEntryName(cc) {
+    if (!cc) return "";
+    cc = cc.toLowerCase();
+    if (cc === "hvc1" || cc === "hev1") return "HEVC (H.265)";
+    if (cc === "avc1" || cc === "avc3") return "AVC (H.264)";
+    if (cc === "vvc1" || cc === "vvi1") return "VVC (H.266)";
+    if (cc === "dvh1" || cc === "dvhe") return "Dolby Vision HEVC";
+    if (cc === "dvav" || cc === "dva1") return "Dolby Vision AVC";
+    if (cc === "mp4v") return "MPEG-4 Visual";
+    return "";
+  }
   function fmtSize(bytes) {
     if (bytes == null) return "?";
     if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MiB";
@@ -193,7 +204,19 @@
       { n: "Format/Info: " + codecFullName() }
     ];
     videoChildren.push({ n: "Format profile: " + si.profile + "@L" + si.level + "@" + (si.tier || "Main") });
-    if (vTrack && vTrack.codec) videoChildren.push({ n: "Codec ID: " + vTrack.codec });
+    if (vTrack && vTrack.codec) {
+      var seName = sampleEntryName(vTrack.codec);
+      videoChildren.push({ n: "Codec ID: " + vTrack.codec + (seName ? " (" + seName + ")" : "") });
+    }
+    if (vTrack && vTrack.codec) {
+      var seCodec = null;
+      var cc = (vTrack.codec || "").toLowerCase();
+      if (cc === "hvc1" || cc === "hev1" || cc === "dvh1" || cc === "dvhe") seCodec = "hevc";
+      else if (cc === "avc1" || cc === "avc3" || cc === "dvav" || cc === "dva1") seCodec = "avc";
+      else if (cc === "vvc1" || cc === "vvi1") seCodec = "vvc";
+      if (seCodec && seCodec !== currentCodec)
+        videoChildren.push({ n: "Note: container declares " + sampleEntryName(vTrack.codec) + " but bitstream parsed as " + codecShortName() + " (possible transcoding on upload)" });
+    }
     if (vTrack && vTrack.seconds) videoChildren.push({ n: "Duration: " + fmtDuration(vTrack.seconds) });
     if (vTrack && vTrack.bitrate) videoChildren.push({ n: "Bit rate: " + fmtBitrate(vTrack.bitrate) });
     var vw = (vTrack && vTrack.width) || hdr.picWidth;
