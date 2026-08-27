@@ -1014,13 +1014,9 @@ timeline.addEventListener("click", function (e) {
       var tmpCanvas = document.createElement("canvas");
       tmpCanvas.width = w; tmpCanvas.height = h;
       var tmpCtx = tmpCanvas.getContext("2d");
-      image.display(tmpCtx, function (ctx) {
-        if (!ctx) {
-          console.error("libheif display returned null");
-          previewMsg.textContent = "HEIC render failed";
-          heicDecoding = false;
-          return;
-        }
+      var imgData = tmpCtx.createImageData(w, h);
+      image.display(imgData, function (imgData) {
+        tmpCtx.putImageData(imgData, 0, 0);
         var canvas = previewCanvas;
         var maxW = previewView.clientWidth - 32, maxH = 480;
         if (maxW < 160) maxW = 160;
