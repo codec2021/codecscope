@@ -376,7 +376,6 @@
 
     // 提取每个 tile：读取 extent 里全部 length-prefixed NAL，用 tile 自己的 hvcC 参数集
     var tiles = [];
-    var firstTileAnnexb = null;
     for (var ti = 0; ti < targetIds.length; ti++) {
       var it = null;
       for (var fj = 0; fj < ilocItems.length; fj++) {
@@ -421,7 +420,16 @@
       }
 
       tiles.push({ annexb: annexb, raw: rawBytes, description: tDesc });
-      if (!firstTileAnnexb) firstTileAnnexb = annexb;
+    }
+
+    // 拼接所有 tile 的 annexb
+    var totalAnnexbSize = 0;
+    for (var tj = 0; tj < tiles.length; tj++) totalAnnexbSize += tiles[tj].annexb.length;
+    var allAnnexb = new Uint8Array(totalAnnexbSize);
+    var aw = 0;
+    for (var tk = 0; tk < tiles.length; tk++) {
+      allAnnexb.set(tiles[tk].annexb, aw);
+      aw += tiles[tk].annexb.length;
     }
 
     // 分辨率
@@ -445,7 +453,7 @@
 
     return {
       codec: "hevc",
-      annexb: firstTileAnnexb || new Uint8Array(0),
+      annexb: allAnnexb,
       description: description,
       nalLengthSize: 1 + (d[mainC + 21] & 0x03),
       picWidth: picWidth,
