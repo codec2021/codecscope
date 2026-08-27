@@ -1,6 +1,6 @@
 # CodecScope
 
-一个在浏览器中运行的 **H.264 / H.265 / H.266 视频码流分析工具**（源自 [HEVCESBrowser](https://github.com/virinext/hevcesbrowser) 的 Web 版）。
+一个在浏览器中运行的 **H.264 / H.265 / H.266 视频码流分析 + HEIC 图片分析工具**（源自 [HEVCESBrowser](https://github.com/virinext/hevcesbrowser) 的 Web 版）。
 
 复用原项目 `hevcparser` 的 C++ 解析核心，并为 H.264 (AVC) 与 H.266 (VVC) 分别实现了新解析器，通过 [Emscripten](https://emscripten.org/) 编译为 WebAssembly，前端使用原生 HTML/CSS/JavaScript，可直接用 **GitHub Pages** 免费静态托管，**无需安装、无需后端**，浏览器打开即用。
 
@@ -13,6 +13,7 @@
 | H.264 (AVC) | AVC/H.264 | `h264parser`（新实现） |
 | H.265 (HEVC) | HEVC/H.265 | `hevcparser`（原项目） |
 | H.266 (VVC) | VVC/H.266 | `vvcparser`（新实现） |
+| HEIC/HEIF | 静态图片 | libheif (Emscripten WASM) |
 
 码流类型会**自动识别**，无需手动选择。
 
@@ -26,7 +27,7 @@
 - **视频播放**：基于 WebCodecs 的帧级预览与播放，支持**解码顺序 / 显示顺序**切换（正确处理 B 帧重排），单帧步进
 - **容器解封装**：直接拖入 MP4/MOV 文件自动解封装（hvcC/avcC 提取 description 供解码）
 - **MediaInfo 面板**：树状展示完整容器信息（General / Video / Audio / Other 轨道）——格式、时长、码率、编码日期、音频采样率/声道/位深、流大小等，类似 MediaInfo
-- **HEIC/HEIF 图片支持**：解析 HEIC 静态图（ispe 分辨率 + hvcC 配置 + iloc/iref 图像数据），显示 IDR 帧与语法树，并支持图片预览
+- **HEIC/HEIF 图片支持**：解析 HEIC 静态图（ispe 分辨率 + hvcC 配置 + iloc/iref 图像数据），支持 **libheif WASM 解码预览**，显示 IDR 帧与语法树
 - **HDR 信息**：色彩原色、传输特性、矩阵系数、CLL、Mastering Display 等（HEVC）
 - **警告面板**：数值越界、引用结构缺失、Profile 一致性检查，支持按类型过滤
 - **三视图联动**：NAL 列表 / 时间轴 / 预览画面点击互相同步高亮跳转
@@ -37,7 +38,7 @@
 
 - 拖拽或选择 **裸基本流**（`.h264 / .h265 / .h266`）、**MP4/MOV** 容器文件，或 **HEIC/HEIF** 图片
 - 点击 NAL 列表任意行查看语法树与 Hex；点击时间轴帧查看预览画面
-- 预览 Tab 中可播放（按真实帧率），并可在「解码顺序 / 显示顺序」间切换
+- 预览 Tab 中可播放（按真实帧率），并可在「Decode Order / Display Order」间切换
 - MediaInfo Tab 查看容器/码流的完整元信息
 - 分隔条可拖动调整各面板大小
 
