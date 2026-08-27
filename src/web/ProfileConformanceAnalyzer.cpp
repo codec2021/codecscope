@@ -243,9 +243,14 @@ namespace web
       std::vector<uint32_t> RowHeightInLumaSamples = rowHeightInLumaSamples(pPPS);
 
       bool bWarning = false;
-      for(std::size_t i = 0; i <= pPPS -> num_tile_columns_minus1; i++)
+      for(std::size_t i = 0; i < ColumnWidthInLumaSamples.size(); i++)
       {
-        if(ColumnWidthInLumaSamples[i] < 256 || RowHeightInLumaSamples[i] <= 64)
+        if(ColumnWidthInLumaSamples[i] < 256)
+          bWarning = true;
+      }
+      for(std::size_t j = 0; j < RowHeightInLumaSamples.size(); j++)
+      {
+        if(RowHeightInLumaSamples[j] <= 64)
           bWarning = true;
       }
 
@@ -274,9 +279,14 @@ namespace web
       std::vector<uint32_t> RowHeightInLumaSamples = rowHeightInLumaSamples(pPPS);
 
       bool bWarning = false;
-      for(std::size_t i = 0; i <= pPPS -> num_tile_columns_minus1; i++)
+      for(std::size_t i = 0; i < ColumnWidthInLumaSamples.size(); i++)
       {
-        if(ColumnWidthInLumaSamples[i] < 256 || RowHeightInLumaSamples[i] <= 64)
+        if(ColumnWidthInLumaSamples[i] < 256)
+          bWarning = true;
+      }
+      for(std::size_t j = 0; j < RowHeightInLumaSamples.size(); j++)
+      {
+        if(RowHeightInLumaSamples[j] <= 64)
           bWarning = true;
       }
 
@@ -305,9 +315,14 @@ namespace web
       std::vector<uint32_t> RowHeightInLumaSamples = rowHeightInLumaSamples(pPPS);
 
       bool bWarning = false;
-      for(std::size_t i = 0; i <= pPPS -> num_tile_columns_minus1; i++)
+      for(std::size_t i = 0; i < ColumnWidthInLumaSamples.size(); i++)
       {
-        if(ColumnWidthInLumaSamples[i] < 256 || RowHeightInLumaSamples[i] <= 64)
+        if(ColumnWidthInLumaSamples[i] < 256)
+          bWarning = true;
+      }
+      for(std::size_t j = 0; j < RowHeightInLumaSamples.size(); j++)
+      {
+        if(RowHeightInLumaSamples[j] <= 64)
           bWarning = true;
       }
 

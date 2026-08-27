@@ -300,12 +300,12 @@ namespace web
         if(pSlice -> dependent_slice_segment_flag)
         {
           e.info = "Dependent Slice";
-          e.sliceType = (int)m_prevSliceType; // 复用前一个 slice 类型
+          // m_prevSliceType 是 HEVC 枚举(B=0,P=1,I=2)，需映射到 JSON 约定(0=P,1=B,2=I)
           switch(m_prevSliceType)
           {
-            case HEVC::Slice::B_SLICE: m_BNumber++; break;
-            case HEVC::Slice::P_SLICE: m_PNumber++; break;
-            case HEVC::Slice::I_SLICE: m_INumber++; break;
+            case HEVC::Slice::B_SLICE: e.sliceType = 1; m_BNumber++; break;
+            case HEVC::Slice::P_SLICE: e.sliceType = 0; m_PNumber++; break;
+            case HEVC::Slice::I_SLICE: e.sliceType = 2; m_INumber++; break;
             case HEVC::Slice::NONE_SLICE: break;
           }
         }

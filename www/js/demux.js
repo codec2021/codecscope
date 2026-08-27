@@ -7,7 +7,10 @@
   function isMp4(d) { return d.length >= 12 && fourCC(d, 4) === "ftyp"; }
   function boxSize(d, o) {
     var size = readU32(d, o);
-    if (size === 1) return readU32(d, o + 8) * 4294967296 + readU32(d, o + 12); // 64-bit largesize
+    if (size === 1) {
+      if (o + 16 > d.length) return NaN;
+      return readU32(d, o + 8) * 4294967296 + readU32(d, o + 12); // 64-bit largesize
+    }
     return size;
   }
 
@@ -262,15 +265,23 @@
     var itemToProps = {};
     if (ipma) {
       var ip = ipma.offset + 8;
-      var ipVer = d[ip]; ip++; ip += 3;
+      var ipVer = d[ip];
+      var ipFlags = (d[ip + 1] << 16) | (d[ip + 2] << 8) | d[ip + 3];
+      ip += 4;
+      var ipEnd = ipma.offset + ipma.size;
       var entryCount = readU32(d, ip); ip += 4;
-      for (var ie = 0; ie < entryCount; ie++) {
-        var itemId = readU16(d, ip); ip += 2;
+      for (var ie = 0; ie < entryCount && ip + 4 <= ipEnd; ie++) {
+        var itemId = (ipVer < 1) ? readU16(d, ip) : readU32(d, ip);
+        ip += (ipVer < 1 ? 2 : 4);
         var propCount = d[ip]; ip += 1;
         var props = [];
-        for (var ipj = 0; ipj < propCount; ipj++) {
-          var propIdx = (ipVer >= 1) ? (readU16(d, ip) & 0x7FFF) : readU16(d, ip);
-          ip += 2;
+        for (var ipj = 0; ipj < propCount && ip + 1 <= ipEnd; ipj++) {
+          var propIdx;
+          if (ipFlags & 1) {
+            propIdx = readU16(d, ip) & 0x7FFF; ip += 2;
+          } else {
+            propIdx = d[ip] & 0x7F; ip += 1;
+          }
           props.push(propIdx);
         }
         itemToProps[itemId] = props;
@@ -346,7 +357,11 @@
 
     // 解析 iref：primary → tile (dimg)
     var pitm = findBox(d, metaContent, metaEnd, "pitm");
-    var primaryId = pitm ? readU16(d, pitm.offset + 12) : 0;
+    var primaryId = 0;
+    if (pitm) {
+      var pitmVer = d[pitm.offset + 8];
+      primaryId = (pitmVer === 0) ? readU16(d, pitm.offset + 12) : readU32(d, pitm.offset + 12);
+    }
     var tileIds = [];
     var iref = findBox(d, metaContent, metaEnd, "iref");
     if (iref) {
@@ -439,16 +454,18 @@
       picHeight = readU32(d, ispeOff + 16);
     }
 
-    // grid 布局
+    // grid 布局（ImageGrid FullBox: version(1)+flags(3) 后 rows_minus_one(1)+columns_minus_one(1)+output_w(4)+output_h(4)）
     var grid = null;
     if (gridOff) {
-      var gp = gridOff + 8;
-      gp++; gp += 3; // version + flags
-      var rows = readU16(d, gp) + 1; gp += 2;
-      var outW = readU16(d, gp); gp += 2;
-      var outH = readU16(d, gp); gp += 2;
-      var cols = readU16(d, gp) + 1; gp += 2;
-      grid = { rows: rows, cols: cols, outputWidth: outW, outputHeight: outH };
+      var gp = gridOff + 12; // 跳过 size(4)+type(4)+version(1)+flags(3)
+      var gEnd = gridOff + boxSize(d, gridOff);
+      if (gp + 10 <= gEnd) {
+        var rows = d[gp] + 1; gp += 1;
+        var cols = d[gp] + 1; gp += 1;
+        var outW = readU32(d, gp); gp += 4;
+        var outH = readU32(d, gp); gp += 4;
+        grid = { rows: rows, cols: cols, outputWidth: outW, outputHeight: outH };
+      }
     }
 
     return {
@@ -529,7 +546,7 @@
           movieTimescale = readU32(d, mvhd.offset + 20);
           movieDuration = readU32(d, mvhd.offset + 24);
         } else {
-          info.creationTime = isoDate(readU32(d, mvhd.offset + 20));
+          info.creationTime = isoDate(readU32(d, mvhd.offset + 12) * 4294967296 + readU32(d, mvhd.offset + 16));
           movieTimescale = readU32(d, mvhd.offset + 28);
           movieDuration = readU32(d, mvhd.offset + 32) * 4294967296 + readU32(d, mvhd.offset + 36);
         }
@@ -568,10 +585,23 @@
     var stsd = stbl ? findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsd") : null;
 
     var handler = hdlr ? fourCC(d, hdlr.offset + 16) : "?";
-    var timescale = mdhd ? readU32(d, mdhd.offset + 20) : 0;
-    var duration = mdhd ? readU32(d, mdhd.offset + 24) : 0;
+    var timescale = 0, duration = 0, trackId = -1;
+    if (mdhd) {
+      var mVer = d[mdhd.offset + 8];
+      if (mVer === 0) {
+        timescale = readU32(d, mdhd.offset + 20);
+        duration = readU32(d, mdhd.offset + 24);
+      } else {
+        timescale = readU32(d, mdhd.offset + 28);
+        duration = readU32(d, mdhd.offset + 32) * 4294967296 + readU32(d, mdhd.offset + 36);
+      }
+    }
+    if (tkhd) {
+      var tVer = d[tkhd.offset + 8];
+      trackId = (tVer === 0) ? readU32(d, tkhd.offset + 20) : readU32(d, tkhd.offset + 28);
+    }
     var track = {
-      id: tkhd ? readU32(d, tkhd.offset + 20) : -1,
+      id: trackId,
       handler: handler,
       timescale: timescale,
       duration: duration,

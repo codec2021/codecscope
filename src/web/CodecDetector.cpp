@@ -50,6 +50,12 @@ namespace web
           if((b0 & 0x1F) == 7 && remaining >= 2 && isAvcProfile(b1))
             return "avc";
 
+          // HEVC VPS/SPS/PPS：第一字节高 6 位 in {32,33,34}
+          // 先于 VVC 检测，避免 HEVC 的 nuh_layer_id ∈ {14,15,16} 被误判为 VVC
+          uint8_t hevcType = (b0 >> 1) & 0x3F;
+          if(hevcType == 32 || hevcType == 33 || hevcType == 34)
+            return "hevc";
+
           // VVC VPS/SPS/PPS：第二字节高 5 位 in {14,15,16}
           if(remaining >= 2)
           {
@@ -57,11 +63,6 @@ namespace web
             if(vvcType == 14 || vvcType == 15 || vvcType == 16)
               return "vvc";
           }
-
-          // HEVC VPS/SPS/PPS：第一字节高 6 位 in {32,33,34}
-          uint8_t hevcType = (b0 >> 1) & 0x3F;
-          if(hevcType == 32 || hevcType == 33 || hevcType == 34)
-            return "hevc";
         }
 
         nalCount++;

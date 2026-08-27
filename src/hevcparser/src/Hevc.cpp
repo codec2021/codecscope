@@ -434,19 +434,19 @@ bool HEVC::PPS::operator == (const HEVC::PPS &pps) const
   if(pps_tc_offset_div2 != pps.pps_tc_offset_div2)
     return false;
 
-  if(pps_scaling_list_data_present_flag != pps_scaling_list_data_present_flag)
+  if(pps_scaling_list_data_present_flag != pps.pps_scaling_list_data_present_flag)
     return false;
 
-  if(lists_modification_present_flag != lists_modification_present_flag)
+  if(lists_modification_present_flag != pps.lists_modification_present_flag)
     return false;
 
-  if(log2_parallel_merge_level_minus2 != log2_parallel_merge_level_minus2)
+  if(log2_parallel_merge_level_minus2 != pps.log2_parallel_merge_level_minus2)
     return false;
 
-  if(slice_segment_header_extension_present_flag != slice_segment_header_extension_present_flag)
+  if(slice_segment_header_extension_present_flag != pps.slice_segment_header_extension_present_flag)
     return false;
 
-  if(pps_extension_flag != pps_extension_flag)
+  if(pps_extension_flag != pps.pps_extension_flag)
     return false;
 
   return true;
@@ -819,7 +819,7 @@ bool RefPicListModification::operator == (const RefPicListModification &obj) con
   if(this == &obj)
     return true;
 
-  if(ref_pic_list_modification_flag_l0 != ref_pic_list_modification_flag_l0)
+  if(ref_pic_list_modification_flag_l0 != obj.ref_pic_list_modification_flag_l0)
     return false;
 
   if(list_entry_l0 != obj.list_entry_l0)
@@ -840,7 +840,8 @@ void ProfileTierLevel::toDefault()
     general_profile_space = 0;
     general_tier_flag = 0;
     general_profile_idc = 0;
-    general_profile_compatibility_flag[32];
+    for(int i = 0; i < 32; i++)
+      general_profile_compatibility_flag[i] = 0;
     general_progressive_source_flag = 0;
     general_interlaced_source_flag = 0;
     general_non_packed_constraint_flag = 0;
