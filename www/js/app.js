@@ -810,6 +810,46 @@ timeline.addEventListener("click", function (e) {
   }
 
   var hlFrame = { slice: -1, x: 0, w: 0 };
+  var playProgress = { start: -1, end: -1 };
+
+  function redrawTimelineBase() {
+    if (!timeline._base || !timeline._slices) return;
+    var ctx = timeline.getContext("2d");
+    var dpr = window.devicePixelRatio || 1;
+    var w = timeline.width / dpr, h = timeline.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(timeline._base, 0, 0, w * dpr, h * dpr, 0, 0, w, h);
+  }
+
+  function drawProgressRange(from, to) {
+    var xs = timeline._xs;
+    if (!xs) return;
+    var ctx = timeline.getContext("2d");
+    var dpr = window.devicePixelRatio || 1;
+    var barW = timeline._barW;
+    var barTop = timeline._labelH || TL_LABEL_H;
+    var barH = TL_BAR_H;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    for (var i = Math.max(0, from); i <= Math.min(to, xs.length - 1); i++) {
+      ctx.fillRect(xs[i], barTop, Math.max(1, barW - 0.6), barH);
+    }
+  }
+
+  function resetPlayProgress(startSlice) {
+    playProgress.start = startSlice;
+    playProgress.end = startSlice;
+    redrawTimelineBase();
+    if (startSlice >= 0) drawProgressRange(startSlice, startSlice);
+  }
+
+  function updatePlayProgress(sliceIndex) {
+    if (playProgress.start < 0) { resetPlayProgress(sliceIndex); return; }
+    if (sliceIndex <= playProgress.end) return;
+    drawProgressRange(playProgress.end + 1, sliceIndex);
+    playProgress.end = sliceIndex;
+  }
 
   // 增量高亮：只重绘高亮框，不重算 frames、不重绘底图（播放时性能关键）
   function highlightFrame(sliceIndex) {
@@ -857,7 +897,10 @@ timeline.addEventListener("click", function (e) {
       drawVideoFrame(frame);
       previewHint.textContent = "Frame " + (f ? f.frameNum : frameIndex) + " / POC " + (f ? f.poc : frameIndex);
     }
-    if (f) highlightFrame(f.first);
+    if (f) {
+      updatePlayProgress(f.first);
+      highlightFrame(f.first);
+    }
     // 基于解码游标清理：只回收很早解码且不会再显示的帧
     var threshold = play.feedFrame - PLAY_FRAME_KEEP;
     for (var k in play.frames) {
@@ -900,6 +943,7 @@ timeline.addEventListener("click", function (e) {
       }
       previewPlayBtn.textContent = "⏸ Pause";
       previewMsg.textContent = "";
+      resetPlayProgress(frames[fi].first);
       feedFrames(fi);
       var iv = 40;
       if (currentData && currentData.streamInfo) {
@@ -1126,6 +1170,7 @@ timeline.addEventListener("click", function (e) {
       vvdecPlay.active = true;
       previewPlayBtn.textContent = "⏸ Pause";
       previewMsg.textContent = "";
+      resetPlayProgress(timeline._frames && timeline._frames.length ? timeline._frames[0].first : -1);
 
       var iv = 33;
       if (currentData && currentData.streamInfo) {
@@ -1258,7 +1303,10 @@ timeline.addEventListener("click", function (e) {
     previewHint.textContent = "Frame " + img.width + " x " + img.height + " (VVC)";
     previewMsg.textContent = "";
     previewCanvasTouched = true;
-    if (sliceIndex >= 0) highlightFrame(sliceIndex);
+    if (sliceIndex >= 0) {
+      updatePlayProgress(sliceIndex);
+      highlightFrame(sliceIndex);
+    }
   }
 
   function loadAndDecodeHeic() {
@@ -1587,6 +1635,7 @@ timeline.addEventListener("click", function (e) {
     selectedIndex = -1;
     selectedSlice = -1;
     hlFrame = { slice: -1, x: 0, w: 0 };
+    playProgress = { start: -1, end: -1 };
 
     timeline._frames = null;
     timeline._slices = null;
