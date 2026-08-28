@@ -884,6 +884,13 @@ timeline.addEventListener("click", function (e) {
       ctx.lineWidth = 1.5;
       ctx.strokeRect(hx + 0.5, barTop + 0.5, hlW, barH - 1);
       hlFrame = { slice: sliceIndex, x: hx, w: hlW };
+      // 自动滚动，让当前帧保持可见
+      var wrap = timeline.parentNode;
+      if (wrap && wrap.scrollWidth > wrap.clientWidth) {
+        var target = hx - wrap.clientWidth / 2;
+        if (target < 0) target = 0;
+        wrap.scrollLeft = target;
+      }
     } else {
       hlFrame.slice = -1;
     }
