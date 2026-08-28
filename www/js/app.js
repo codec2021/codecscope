@@ -549,11 +549,15 @@
         }
       }
       ctx.strokeRect(hx + 0.5, barTop + 0.5, hlW, barH - 1);
+      hlFrame = { slice: selectedSlice, x: hx, w: hlW };
+    } else {
+      hlFrame.slice = -1;
     }
     timeline._slices = slices;
     timeline._xs = xs;
     timeline._barW = barW;
     timeline._frameGap = frameGap;
+    timeline._innerGap = innerGap;
     timeline._labelH = labelH;
     var nalToSlice = {};
     for (var mi = 0; mi < slices.length; mi++) nalToSlice[slices[mi].index] = mi;
@@ -805,6 +809,47 @@ timeline.addEventListener("click", function (e) {
     });
   }
 
+  var hlFrame = { slice: -1, x: 0, w: 0 };
+
+  // 增量高亮：只重绘高亮框，不重算 frames、不重绘底图（播放时性能关键）
+  function highlightFrame(sliceIndex) {
+    var xs = timeline._xs, slices = timeline._slices, base = timeline._base;
+    if (!xs || !slices) return;
+    if (sliceIndex === hlFrame.slice) return;
+    var ctx = timeline.getContext("2d");
+    var dpr = window.devicePixelRatio || 1;
+    var barW = timeline._barW;
+    var barTop = timeline._labelH || TL_LABEL_H;
+    var barH = TL_BAR_H;
+
+    // 清除旧高亮：用底图重绘旧区域
+    if (hlFrame.slice >= 0 && hlFrame.slice < slices.length && base) {
+      var ox = hlFrame.x, ow = hlFrame.w + 3;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.drawImage(base, ox * dpr, barTop * dpr, ow * dpr, barH * dpr, ox, barTop, ow, barH);
+    }
+
+    if (sliceIndex >= 0 && sliceIndex < slices.length) {
+      var hx = xs[sliceIndex];
+      var innerGap = timeline._innerGap || 0;
+      var hlW = Math.max(1, barW - 1);
+      for (var hi = 0; hi < timeline._frames.length; hi++) {
+        if (timeline._frames[hi].first === sliceIndex) {
+          hlW = Math.max(1, (timeline._frames[hi].last - timeline._frames[hi].first + 1) * (barW + innerGap) - innerGap - 1);
+          break;
+        }
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(hx + 0.5, barTop + 0.5, hlW, barH - 1);
+      hlFrame = { slice: sliceIndex, x: hx, w: hlW };
+    } else {
+      hlFrame.slice = -1;
+    }
+    selectedSlice = sliceIndex;
+  }
+
   function showPlayFrame(frameIndex) {
     var frame = play.frames[frameIndex];
     var f = timeline._frames[frameIndex];
@@ -812,6 +857,7 @@ timeline.addEventListener("click", function (e) {
       drawVideoFrame(frame);
       previewHint.textContent = "Frame " + (f ? f.frameNum : frameIndex) + " / POC " + (f ? f.poc : frameIndex);
     }
+    if (f) highlightFrame(f.first);
     // 基于解码游标清理：只回收很早解码且不会再显示的帧
     var threshold = play.feedFrame - PLAY_FRAME_KEEP;
     for (var k in play.frames) {
@@ -1062,7 +1108,8 @@ timeline.addEventListener("click", function (e) {
     timer: null,
     decoder: null,
     nalIdx: 0,
-    cts: 0
+    cts: 0,
+    curSlice: -1
   };
 
   function startVvcPlayback() {
@@ -1099,12 +1146,16 @@ timeline.addEventListener("click", function (e) {
         for (var q = auStart; q < auEnd; q++) {
           var t = currentData.nalus[q].type;
           if (t === 20) vvdecPlay.cts++;
+          if (t >= 0 && t <= 12) {
+            var si = timeline._nalToSlice ? timeline._nalToSlice[q] : -1;
+            if (si !== undefined && si >= 0) vvdecPlay.curSlice = si;
+          }
           var au = makeVvcAu(q, vvdecPlay.cts);
           if (!au) continue;
           var h = new M.FrameHandle();
           vvdecPlay.decoder.decode(au, h);
           if (h.frame) {
-            drawVvcFrame(M, h.frame);
+            drawVvcFrame(M, h.frame, vvdecPlay.curSlice);
             vvdecPlay.decoder.frame_unref(h.frame);
           }
         }
@@ -1192,7 +1243,7 @@ timeline.addEventListener("click", function (e) {
     });
   }
 
-  function drawVvcFrame(M, framePtr) {
+  function drawVvcFrame(M, framePtr, sliceIndex) {
     var img = M.get_RGBA_image_JS(framePtr);
     var c = previewCanvas;
     var tmp = document.createElement("canvas");
@@ -1207,6 +1258,7 @@ timeline.addEventListener("click", function (e) {
     previewHint.textContent = "Frame " + img.width + " x " + img.height + " (VVC)";
     previewMsg.textContent = "";
     previewCanvasTouched = true;
+    if (sliceIndex >= 0) highlightFrame(sliceIndex);
   }
 
   function loadAndDecodeHeic() {
@@ -1534,6 +1586,7 @@ timeline.addEventListener("click", function (e) {
     currentHeicRawBytes = null;
     selectedIndex = -1;
     selectedSlice = -1;
+    hlFrame = { slice: -1, x: 0, w: 0 };
 
     timeline._frames = null;
     timeline._slices = null;
