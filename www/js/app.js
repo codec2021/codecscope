@@ -131,6 +131,7 @@
     if (currentCodec === "avc") return "AVC (Advanced Video Coding) / H.264";
     if (currentCodec === "hevc") return "HEVC (High Efficiency Video Coding) / H.265";
     if (currentCodec === "vvc") return "VVC (Versatile Video Coding) / H.266";
+    if (currentCodec === "jpeg") return "JPEG (Joint Photographic Experts Group)";
     if (currentCodec === "image") return "Image (no bitstream syntax)";
     return "Unknown";
   }
@@ -138,6 +139,7 @@
     if (currentCodec === "avc") return "AVC";
     if (currentCodec === "hevc") return "HEVC";
     if (currentCodec === "vvc") return "VVC";
+    if (currentCodec === "jpeg") return "JPEG";
     if (currentCodec === "image") return "Image";
     return "?";
   }
@@ -1197,7 +1199,7 @@ timeline.addEventListener("click", function (e) {
       rows[i].classList.toggle("selected", parseInt(rows[i].dataset.index, 10) === index);
     }
 
-    renderSyntax(fetchNalSyntax(index));
+    renderSyntax(nal.jpegSyntax || fetchNalSyntax(index));
     renderHex(index);
 
     if (scrollTo) {
@@ -1312,7 +1314,29 @@ timeline.addEventListener("click", function (e) {
         var imageW = 0, imageH = 0;
         var result = null;
         var simpleImageType = H26xDemux.detectImageType(rawBytes);
-        if (simpleImageType) {
+        if (simpleImageType === "image/jpeg") {
+          var jpeg = (typeof JpegParser !== "undefined") ? JpegParser.parseJpeg(rawBytes) : null;
+          currentImageBlob = new Blob([rawBytes], { type: "image/jpeg" });
+          currentHeicRawBytes = null;
+          fileBytes = rawBytes;
+          currentDescription = null;
+          currentNalLengthSize = 4;
+          currentContainerInfo = null;
+          isImage = true;
+          srcNote = " (JPEG image)";
+          var segs = jpeg ? jpeg.segments : [];
+          if (jpeg && jpeg.width) { imageW = jpeg.width; imageH = jpeg.height; }
+          result = {
+            codec: "jpeg",
+            imageLabel: "JPEG",
+            data: {
+              nalus: segs.map(function (s) { return { offset: s.offset, length: s.length, type: s.type, typeName: s.typeName, info: s.info, color: s.color, sliceType: -1, jpegSyntax: s.syntax }; }),
+              streamInfo: { nalus: segs.length, slices: 0, i: 0, p: 0, b: 0, profile: "JPEG", level: "-", picWidth: jpeg ? jpeg.width : 0, picHeight: jpeg ? jpeg.height : 0 },
+              hdr: {},
+              warnings: []
+            }
+          };
+        } else if (simpleImageType) {
           currentImageBlob = new Blob([rawBytes], { type: simpleImageType });
           currentHeicRawBytes = null;
           fileBytes = new Uint8Array(0);
