@@ -964,9 +964,9 @@ timeline.addEventListener("click", function (e) {
 
   function drawVideoFrame(frame) {
     var c = previewCanvas;
-    var w = frame.displayWidth, h = frame.displayHeight;
-    if (w <= 0 || h <= 0) { w = frame.codedWidth; h = frame.codedHeight; }
-    if (w <= 0 || h <= 0) { w = frame.width; h = frame.height; } // ImageBitmap
+    var w = frame.displayWidth || frame.codedWidth || frame.width || 0;
+    var h = frame.displayHeight || frame.codedHeight || frame.height || 0;
+    if (w <= 0 || h <= 0) return;
     var maxW = previewView.clientWidth - 32;
     var maxH = 480;
     if (maxW < 160) maxW = 160;
