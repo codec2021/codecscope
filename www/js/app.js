@@ -828,6 +828,7 @@ timeline.addEventListener("click", function (e) {
   function startPlayback() {
     if (play.active) { stopPlayback(); return; }
     if (currentData && currentData.isImage) { return; }
+    if (currentCodec === "vvc") { previewMsg.textContent = "VVC playback not supported; click a frame to preview"; return; }
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
     var fi = 0;
@@ -887,11 +888,13 @@ timeline.addEventListener("click", function (e) {
   function isVclNal(type) {
     if (currentCodec === "avc") return type === 1 || type === 5;
     if (currentCodec === "hevc") return type <= 31;
+    if (currentCodec === "vvc") return type >= 0 && type <= 12;
     return false;
   }
   function isKeyNal(type) {
     if (currentCodec === "avc") return type === 5;
     if (currentCodec === "hevc") return type === 16 || type === 17 || type === 18 || type === 19 || type === 20 || type === 21;
+    if (currentCodec === "vvc") return type === 7 || type === 8 || type === 9 || type === 10;
     return false;
   }
 
