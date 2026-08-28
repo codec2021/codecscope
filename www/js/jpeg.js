@@ -180,7 +180,7 @@
       { n: "Width = " + width },
       { n: "Number of components = " + comps }
     ];
-    for (var i = 0; i < comps; i++) {
+    for (var i = 0; i < comps && o + 6 + i * 3 + 2 < d.length; i++) {
       var cp = o + 6 + i * 3;
       var id = d[cp];
       var sf = d[cp + 1];
@@ -218,16 +218,18 @@
   function parseDht(d, o, len) {
     var c = [];
     var p = o;
-    while (p < o + len) {
+    while (p + 1 <= o + len) {
       var tc = d[p] >> 4;
       var th = d[p] & 0x0F;
       p++;
+      if (p + 16 > o + len) break;
       var counts = [];
       var total = 0;
       for (var i = 0; i < 16; i++) { counts.push(d[p]); total += d[p]; p++; }
       var classStr = tc === 0 ? "DC" : "AC";
       c.push({ n: "Huffman table " + classStr + " #" + th + " (" + total + " symbols)" });
       c.push({ n: "Code counts: " + counts.join(", ") });
+      if (p + total > o + len) break;
       p += total; // 跳过符号值
     }
     return c;

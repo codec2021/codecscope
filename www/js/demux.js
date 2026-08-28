@@ -255,7 +255,7 @@
       var p = i + 8;
       var baseDataOffset = -1;      // tfhd 里的绝对 base offset（-1 未设置）
       var defaultSampleSize = 0;    // tfhd 的 default_sample_size
-      var runningOffset = -1;       // 无 data_offset 时的累积偏移
+      var runningRel = 0;           // 无 data_offset 时的累积相对偏移（相对 base）
 
       while (p + 8 <= moofEnd) {
         var bsz = boxSize(d, p);
@@ -287,15 +287,13 @@
             if (tflags & 1) { dataOffset = readU32(d, r); r += 4; }
             if (tflags & 4) r += 4;      // first_sample_flags
 
-            var sampleOffset;
-            if (tflags & 1) {
-              sampleOffset = i + dataOffset;                 // 相对 moof 起始
-            } else if (baseDataOffset >= 0) {
-              sampleOffset = baseDataOffset + (runningOffset >= 0 ? runningOffset : 0);
-            } else {
-              sampleOffset = runningOffset;                  // 继续上一个 trun 末尾
-            }
+            // base：tfhd 的 base_data_offset 优先，否则 moof 起始
+            var absBase = (baseDataOffset >= 0) ? baseDataOffset : i;
+            // 相对 base 的起始偏移：有 data_offset 用 data_offset，否则紧接上一个 trun 末尾
+            var relStart = (tflags & 1) ? dataOffset : runningRel;
+            var sampleOffset = absBase + relStart;
 
+            var totalSize = 0;
             for (var s = 0; s < sampleCount; s++) {
               if (tflags & 0x100) r += 4;                    // sample_duration
               var sampleSize = defaultSampleSize;
@@ -308,14 +306,15 @@
                 var p2 = 0;
                 while (p2 + 4 <= sample.length) {
                   var nlen = readU32(sample, p2); p2 += 4;
-                  if (nlen < 0 || p2 + nlen > sample.length) break;
+                  if (p2 + nlen > sample.length) break;
                   nals.push(sample.subarray(p2, p2 + nlen));
                   p2 += nlen;
                 }
               }
               sampleOffset += sampleSize;
+              totalSize += sampleSize;
             }
-            runningOffset = sampleOffset;
+            runningRel = relStart + totalSize;
           }
 
           q += tsz;

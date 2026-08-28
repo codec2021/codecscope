@@ -1067,7 +1067,9 @@ timeline.addEventListener("click", function (e) {
 
   function startVvcPlayback() {
     if (vvdecPlay.active) { stopPlayback(); return; }
+    if (vvdecLoading) return;
     loadVvdec(function () {
+      if (vvdecPlay.active) return;
       var M = vvdecModule;
       var params = new M.Params();
       params.threads = 0;
