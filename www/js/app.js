@@ -822,13 +822,16 @@ timeline.addEventListener("click", function (e) {
   function stopPlayback() {
     if (play.timer) { clearInterval(play.timer); play.timer = null; }
     play.active = false;
+    if (vvdecPlay.timer) { clearInterval(vvdecPlay.timer); vvdecPlay.timer = null; }
+    vvdecPlay.active = false;
+    if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
     previewPlayBtn.textContent = "▶ Play";
   }
 
   function startPlayback() {
-    if (play.active) { stopPlayback(); return; }
+    if (play.active || vvdecPlay.active) { stopPlayback(); return; }
     if (currentData && currentData.isImage) { return; }
-    if (currentCodec === "vvc") { previewMsg.textContent = "VVC playback not supported; click a frame to preview"; return; }
+    if (currentCodec === "vvc") { startVvcPlayback(); return; }
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
     var fi = 0;
@@ -1040,6 +1043,74 @@ timeline.addEventListener("click", function (e) {
     document.head.appendChild(s);
   }
 
+  function makeVvcAu(nalIdx, cts) {
+    var M = vvdecModule;
+    var nal = currentData.nalus[nalIdx];
+    var off = nal.offset, len = nal.length;
+    if (off < 0 || off + len > fileBytes.length) return null;
+    var body = fileBytes.subarray(off, off + len);
+    var au = new M.AccessUnit();
+    au.alloc_payload(body.length);
+    au.payload.set(body);
+    au.payloadUsedSize = body.length;
+    au.cts = cts; au.ctsValid = true; au.dts = cts; au.dtsValid = true;
+    return au;
+  }
+
+  var vvdecPlay = {
+    active: false,
+    timer: null,
+    decoder: null,
+    nalIdx: 0,
+    cts: 0
+  };
+
+  function startVvcPlayback() {
+    if (vvdecPlay.active) { stopPlayback(); return; }
+    loadVvdec(function () {
+      var M = vvdecModule;
+      var params = new M.Params();
+      params.threads = 0;
+      vvdecPlay.decoder = new M.Decoder(params);
+      vvdecPlay.nalIdx = 0;
+      vvdecPlay.cts = 0;
+      vvdecPlay.active = true;
+      previewPlayBtn.textContent = "⏸ Pause";
+      previewMsg.textContent = "";
+
+      var iv = 33;
+      if (currentData && currentData.streamInfo) {
+        var fpsN = parseFloat(currentData.streamInfo.fps);
+        if (fpsN > 0) iv = Math.max(1, Math.round(1000 / fpsN));
+      }
+
+      vvdecPlay.timer = setInterval(function () {
+        if (!vvdecPlay.active || !vvdecPlay.decoder) return;
+        // 喂一个 AU（从当前 NAL 到下一个 AUD）
+        var total = currentData.nalus.length;
+        if (vvdecPlay.nalIdx >= total) { stopPlayback(); return; }
+        var auStart = vvdecPlay.nalIdx;
+        var auEnd = total;
+        for (var i = auStart; i < total; i++) {
+          if (i > auStart && currentData.nalus[i].type === 20) { auEnd = i; break; }
+        }
+        for (var q = auStart; q < auEnd; q++) {
+          var t = currentData.nalus[q].type;
+          if (t === 20) vvdecPlay.cts++;
+          var au = makeVvcAu(q, vvdecPlay.cts);
+          if (!au) continue;
+          var h = new M.FrameHandle();
+          vvdecPlay.decoder.decode(au, h);
+          if (h.frame) {
+            drawVvcFrame(M, h.frame);
+            vvdecPlay.decoder.frame_unref(h.frame);
+          }
+        }
+        vvdecPlay.nalIdx = auEnd;
+      }, iv);
+    });
+  }
+
   function decodeVvcFrame(fi) {
     loadVvdec(function () {
       var M = vvdecModule;
@@ -1090,8 +1161,8 @@ timeline.addEventListener("click", function (e) {
           var au2 = feedNal(q);
           if (!au2) continue;
           var h = new M.FrameHandle();
-          var ret = decoder.decode(au2, h);
-          if (ret > 0 && h.frame) {
+          decoder.decode(au2, h);
+          if (h.frame) {
             if (lastFramePtr) decoder.frame_unref(lastFramePtr);
             lastFramePtr = h.frame;
           }
@@ -1209,7 +1280,7 @@ timeline.addEventListener("click", function (e) {
   function previewFrame(sliceIndex) {
     if (!fileBytes || !currentData) return;
     if (currentData.isImage) {
-      if (play.active) stopPlayback();
+      if (play.active || vvdecPlay.active) stopPlayback();
       if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
       for (var fk in play.frames) { try { play.frames[fk].close(); } catch (e) {} }
       play.frames = {};
@@ -1253,6 +1324,7 @@ timeline.addEventListener("click", function (e) {
       if (!frames0 || frames0.length === 0) return;
       var fi0 = frameIndexOfSlice(sliceIndex);
       if (fi0 < 0) fi0 = 0;
+      if (play.active || vvdecPlay.active) stopPlayback();
       previewMsg.textContent = "";
       previewHint.textContent = "Decoding VVC...";
       decodeVvcFrame(fi0);
@@ -1262,7 +1334,7 @@ timeline.addEventListener("click", function (e) {
       previewMsg.textContent = "Browser does not support WebCodecs";
       return;
     }
-    if (play.active) stopPlayback();
+    if (play.active || vvdecPlay.active) stopPlayback();
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
     var fi = frameIndexOfSlice(sliceIndex);
@@ -1408,14 +1480,14 @@ timeline.addEventListener("click", function (e) {
   previewNextBtn.addEventListener("click", function () { stepFrame(1); });
   var previewOrderBtn = document.getElementById("previewOrderBtn");
   previewOrderBtn.addEventListener("click", function () {
-    if (play.active) stopPlayback();
+    if (play.active || vvdecPlay.active) stopPlayback();
     play.displayOrder = !play.displayOrder;
     previewOrderBtn.textContent = play.displayOrder ? "Display Order" : "Decode Order";
     previewOrderBtn.title = play.displayOrder ? "Play in display order (POC)" : "Play in decode order";
   });
 
   function stepFrame(delta) {
-    if (play.active) stopPlayback();
+    if (play.active || vvdecPlay.active) stopPlayback();
     if (currentData && currentData.isImage) return;
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
@@ -1436,7 +1508,7 @@ timeline.addEventListener("click", function (e) {
   // ---------- 文件处理 ----------
   function handleFile(file) {
     if (!file) return;
-    if (play.active) stopPlayback();
+    if (play.active || vvdecPlay.active) stopPlayback();
     if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
     for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
     play.frames = {};
@@ -1598,7 +1670,7 @@ timeline.addEventListener("click", function (e) {
   fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
 
   function resetAll() {
-    if (play.active) stopPlayback();
+    if (play.active || vvdecPlay.active) stopPlayback();
     if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
     for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
     play.frames = {};
