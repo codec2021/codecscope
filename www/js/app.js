@@ -1609,6 +1609,7 @@ timeline.addEventListener("click", function (e) {
         currentCodec = result.codec;
         currentData = result.data;
         currentWarnings = result.data.warnings || [];
+        if (currentCodec === "vvc") loadVvdec(function () {});
         if (isImage) {
           currentData.isImage = true;
           if (imageW && imageH) {
