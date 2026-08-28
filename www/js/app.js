@@ -1508,16 +1508,24 @@ timeline.addEventListener("click", function (e) {
   // ---------- 文件处理 ----------
   function handleFile(file) {
     if (!file) return;
-    if (play.active || vvdecPlay.active) stopPlayback();
+    stopPlayback();
     if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
     for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
     play.frames = {};
     play.feedFrame = -1;
+    if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
+    vvdecPlay.nalIdx = 0;
+    vvdecPlay.cts = 0;
     heicDecoding = false;
     timeline._frames = null;
     timeline._slices = null;
     timeline._nalToSlice = null;
     timeline._xs = null;
+    previewCanvas.width = 0;
+    previewCanvas.height = 0;
+    previewCanvasTouched = false;
+    previewHint.textContent = "";
+    previewMsg.textContent = "Click a frame on the timeline to preview";
     setStatus("Parsing " + file.name + " ...");
     fileNameEl.textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)";
 
@@ -1671,11 +1679,14 @@ timeline.addEventListener("click", function (e) {
   fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
 
   function resetAll() {
-    if (play.active || vvdecPlay.active) stopPlayback();
+    stopPlayback();
     if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
     for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
     play.frames = {};
     play.feedFrame = -1;
+    if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
+    vvdecPlay.nalIdx = 0;
+    vvdecPlay.cts = 0;
     heicDecoding = false;
     currentData = null;
     currentCodec = null;
@@ -1690,6 +1701,9 @@ timeline.addEventListener("click", function (e) {
     timeline._base = null;
     timeline._baseBarW = null;
     timeline._baseSliceCount = null;
+    previewCanvas.width = 0;
+    previewCanvas.height = 0;
+    previewCanvasTouched = false;
 
     codecBadge.classList.add("hidden");
     codecBadge.textContent = "";
