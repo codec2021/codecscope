@@ -997,6 +997,142 @@ timeline.addEventListener("click", function (e) {
 
   var libheifModule = null;
 
+  // ---------- VVC vvdec 解码 ----------
+  var vvdecModule = null;
+  var vvdecLoading = false;
+  var vvdecPending = [];
+
+  function loadVvdec(cb) {
+    if (vvdecModule) { cb(); return; }
+    vvdecPending.push(cb);
+    if (vvdecLoading) return;
+    vvdecLoading = true;
+    previewMsg.textContent = "Loading VVC decoder (vvdec)...";
+    var s = document.createElement("script");
+    s.src = "js/vvdecapp.js";
+    s.onload = function () {
+      if (typeof CreateVVdeC !== "function") {
+        vvdecLoading = false;
+        vvdecPending = [];
+        previewMsg.textContent = "VVC decoder module not found";
+        return;
+      }
+      CreateVVdeC({ locateFile: function (f) { return "js/" + f; } }).then(function (m) {
+        vvdecModule = m;
+        vvdecLoading = false;
+        var cbs = vvdecPending;
+        vvdecPending = [];
+        cbs.forEach(function (f) { f(); });
+      }).catch(function (e) {
+        vvdecLoading = false;
+        vvdecPending = [];
+        previewMsg.textContent = "VVC decoder init failed: " + (e && e.message ? e.message : e);
+      });
+    };
+    s.onerror = function () {
+      vvdecLoading = false;
+      vvdecPending = [];
+      previewMsg.textContent = "Failed to load VVC decoder";
+    };
+    document.head.appendChild(s);
+  }
+
+  function decodeVvcFrame(fi) {
+    loadVvdec(function () {
+      var M = vvdecModule;
+      var frames = timeline._frames;
+      if (!frames || frames.length === 0) return;
+      var keyFi = findKeyFrame(fi);
+      if (keyFi < 0) { previewMsg.textContent = "Key frame not found"; return; }
+
+      var targetLastSlice = frames[fi].last;
+      var targetLastNal = timeline._slices[targetLastSlice].index;
+
+      var params = new M.Params();
+      params.threads = 0;
+      var decoder = new M.Decoder(params);
+
+      var cts = 0;
+
+      function feedNal(nalIdx) {
+        var nal = currentData.nalus[nalIdx];
+        var off = nal.offset, len = nal.length;
+        if (off < 0 || off + len > fileBytes.length) return null;
+        var body = fileBytes.subarray(off, off + len);
+        var au = new M.AccessUnit();
+        au.alloc_payload(body.length);
+        au.payload.set(body);
+        au.payloadUsedSize = body.length;
+        au.cts = cts; au.ctsValid = true; au.dts = cts; au.dtsValid = true;
+        return au;
+      }
+
+      try {
+        // 关键帧第一个 slice 的 NAL index
+        var firstSliceNal = timeline._slices[frames[keyFi].first].index;
+        // 往前找关键帧 AU 的起点（AUD 或参数集）
+        var startNal = firstSliceNal;
+        for (var p = firstSliceNal - 1; p >= 0; p--) {
+          var pt = currentData.nalus[p].type;
+          if (pt === 20) { startNal = p; break; }        // AUD
+          if (pt >= 0 && pt <= 12) break;                  // 上一个 slice，停止
+          if (pt >= 14 && pt <= 17) startNal = p;          // 参数集
+        }
+
+        var lastFramePtr = 0;
+        // 从 startNal 喂到目标帧最后一个 slice
+        for (var q = startNal; q <= targetLastNal; q++) {
+          var t2 = currentData.nalus[q].type;
+          if (t2 === 20) cts++; // AUD 边界递增 cts
+          var au2 = feedNal(q);
+          if (!au2) continue;
+          var h = new M.FrameHandle();
+          var ret = decoder.decode(au2, h);
+          if (ret > 0 && h.frame) {
+            if (lastFramePtr) decoder.frame_unref(lastFramePtr);
+            lastFramePtr = h.frame;
+          }
+        }
+
+        // flush 输出剩余帧，取最后一个
+        var fh = new M.FrameHandle();
+        decoder.flush(fh);
+        if (fh.frame) {
+          if (lastFramePtr) decoder.frame_unref(lastFramePtr);
+          lastFramePtr = fh.frame;
+        }
+
+        if (lastFramePtr) {
+          drawVvcFrame(M, lastFramePtr);
+          decoder.frame_unref(lastFramePtr);
+        } else {
+          previewMsg.textContent = "VVC decode: no output";
+        }
+      } catch (e) {
+        previewMsg.textContent = "VVC decode error: " + e.message;
+      } finally {
+        try { decoder.delete(); } catch (e2) {}
+      }
+    });
+  }
+
+  function drawVvcFrame(M, framePtr) {
+    var img = M.get_RGBA_image_JS(framePtr);
+    var c = previewCanvas;
+    var tmp = document.createElement("canvas");
+    tmp.width = img.width; tmp.height = img.height;
+    tmp.getContext("2d").putImageData(img, 0, 0);
+    var maxW = previewView.clientWidth - 32, maxH = 480;
+    if (maxW < 160) maxW = 160;
+    var scale = Math.min(1, maxW / img.width, maxH / img.height);
+    c.width = Math.max(1, Math.round(img.width * scale));
+    c.height = Math.max(1, Math.round(img.height * scale));
+    c.getContext("2d").drawImage(tmp, 0, 0, c.width, c.height);
+    previewHint.textContent = "Frame " + img.width + " x " + img.height + " (VVC)";
+    previewMsg.textContent = "";
+    previewCanvasTouched = true;
+  }
+
   function loadAndDecodeHeic() {
     if (libheifModule) { decodeWithLibheif(); return; }
     if (typeof libheif === "function") { initLibheif(); return; }
@@ -1110,7 +1246,13 @@ timeline.addEventListener("click", function (e) {
     heicDecoding = false;
     if (!timeline._slices) return;
     if (currentCodec === "vvc") {
-      previewMsg.textContent = "H.266 (VVC) cannot be decoded in browser";
+      var frames0 = timeline._frames;
+      if (!frames0 || frames0.length === 0) return;
+      var fi0 = frameIndexOfSlice(sliceIndex);
+      if (fi0 < 0) fi0 = 0;
+      previewMsg.textContent = "";
+      previewHint.textContent = "Decoding VVC...";
+      decodeVvcFrame(fi0);
       return;
     }
     if (!("VideoDecoder" in window)) {
