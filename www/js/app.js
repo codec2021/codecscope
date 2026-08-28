@@ -1506,26 +1506,67 @@ timeline.addEventListener("click", function (e) {
   }
 
   // ---------- 文件处理 ----------
-  function handleFile(file) {
-    if (!file) return;
+  function clearAll() {
     stopPlayback();
     if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
     for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
     play.frames = {};
     play.feedFrame = -1;
+    play.params = [];
+    play.curFrame = -1;
+    play.order = null;
+    play.orderPos = -1;
     if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
     vvdecPlay.nalIdx = 0;
     vvdecPlay.cts = 0;
     heicDecoding = false;
+
+    currentData = null;
+    currentCodec = null;
+    currentWarnings = [];
+    fileBytes = null;
+    currentDescription = null;
+    currentNalLengthSize = 4;
+    currentContainerInfo = null;
+    currentImageBlob = null;
+    currentHeicRawBytes = null;
+    selectedIndex = -1;
+    selectedSlice = -1;
+
     timeline._frames = null;
     timeline._slices = null;
     timeline._nalToSlice = null;
     timeline._xs = null;
+    timeline._base = null;
+    timeline._baseBarW = null;
+    timeline._baseSliceCount = null;
+    timeline.width = 0;
+    timeline.height = 0;
+
     previewCanvas.width = 0;
     previewCanvas.height = 0;
     previewCanvasTouched = false;
     previewHint.textContent = "";
     previewMsg.textContent = "Click a frame on the timeline to preview";
+
+    syntaxTree.innerHTML = "";
+    syntaxTitle.textContent = "";
+    mediaInfoView.innerHTML = "";
+    mediaInfoView.dataset.rendered = "";
+    hdrInfo.innerHTML = "";
+    warningBody.innerHTML = "";
+    warningCount.textContent = "";
+    nalRows.innerHTML = "";
+    nalSpacer.style.height = "0px";
+    nalCount.textContent = "";
+    codecBadge.textContent = "";
+    codecBadge.classList.add("hidden");
+    statsBar.innerHTML = "";
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    clearAll();
     setStatus("Parsing " + file.name + " ...");
     fileNameEl.textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)";
 
@@ -1662,12 +1703,7 @@ timeline.addEventListener("click", function (e) {
 
         setStatus("Parsed: " + currentCodec.toUpperCase() + ", " + currentData.nalus.length + " NAL units" + srcNote + ", " + (t1 - t0).toFixed(0) + " ms");
       } catch (err) {
-        currentData = null;
-        currentCodec = null;
-        fileBytes = null;
-        timeline._frames = null;
-        timeline._slices = null;
-        timeline._nalToSlice = null;
+        clearAll();
         setStatus("Parse error: " + err.message);
         console.error(err);
       }
@@ -1679,67 +1715,20 @@ timeline.addEventListener("click", function (e) {
   fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
 
   function resetAll() {
-    stopPlayback();
-    if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
-    for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
-    play.frames = {};
-    play.feedFrame = -1;
-    if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
-    vvdecPlay.nalIdx = 0;
-    vvdecPlay.cts = 0;
-    heicDecoding = false;
-    currentData = null;
-    currentCodec = null;
-    currentWarnings = [];
-    fileBytes = null;
-    currentDescription = null;
-    currentNalLengthSize = 4;
-    currentContainerInfo = null;
-    currentImageBlob = null;
-    currentHeicRawBytes = null;
-    selectedIndex = -1;
-    timeline._base = null;
-    timeline._baseBarW = null;
-    timeline._baseSliceCount = null;
-    previewCanvas.width = 0;
-    previewCanvas.height = 0;
-    previewCanvasTouched = false;
-
-    codecBadge.classList.add("hidden");
-    codecBadge.textContent = "";
+    clearAll();
     fileNameEl.textContent = "No file loaded";
     fileInput.value = "";
 
     dropzone.classList.remove("hidden");
     statsBar.classList.add("hidden");
-    statsBar.innerHTML = "";
     timelinePanel.classList.add("hidden");
-    if (play.timer) { clearInterval(play.timer); play.timer = null; }
-    if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
-    for (var pk in play.frames) { try { play.frames[pk].close(); } catch (e) {} }
-    play.frames = {};
-    play.active = false;
-    play.feedFrame = -1;
     previewPlayBtn.textContent = "▶ Play";
     mainArea.classList.add("hidden");
     bottomPanels.classList.add("hidden");
     resetBtn.classList.add("hidden");
 
-    nalSpacer.style.height = "0px";
-    nalCount.textContent = "";
-    nalRows.innerHTML = "";
-    syntaxTree.innerHTML = "";
-    syntaxTitle.textContent = "";
-    mediaInfoView.innerHTML = "";
-    mediaInfoView.dataset.rendered = "";
     hexView.innerHTML = "";
-    previewMsg.textContent = "Click a frame on the timeline to preview";
-    previewHint.textContent = "";
-    previewCanvasTouched = false;
     showTab("syntax");
-    hdrInfo.innerHTML = "";
-    warningBody.innerHTML = "";
-    warningCount.textContent = "";
 
     setStatus("Parser ready (H.264/H.265/H.266). Open or drop a bitstream file.");
   }
