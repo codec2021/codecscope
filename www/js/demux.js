@@ -5,6 +5,18 @@
   function readU16(d, o) { return (d[o] << 8) | d[o + 1]; }
   function fourCC(d, o) { return String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]); }
   function isMp4(d) { return d.length >= 12 && fourCC(d, 4) === "ftyp"; }
+  function detectImageType(d) {
+    // 检测浏览器可原生解码的图片格式，返回 MIME 类型或 null
+    if (d.length >= 8 && d[0] === 0x89 && d[1] === 0x50 && d[2] === 0x4E && d[3] === 0x47 &&
+        d[4] === 0x0D && d[5] === 0x0A && d[6] === 0x1A && d[7] === 0x0A) return "image/png";
+    if (d.length >= 3 && d[0] === 0xFF && d[1] === 0xD8 && d[2] === 0xFF) return "image/jpeg";
+    if (d.length >= 6 && d[0] === 0x47 && d[1] === 0x49 && d[2] === 0x46 && d[3] === 0x38 &&
+        (d[4] === 0x37 || d[4] === 0x39) && d[5] === 0x61) return "image/gif";
+    if (d.length >= 12 && d[0] === 0x52 && d[1] === 0x49 && d[2] === 0x46 && d[3] === 0x46 &&
+        d[8] === 0x57 && d[9] === 0x45 && d[10] === 0x42 && d[11] === 0x50) return "image/webp";
+    if (d.length >= 2 && d[0] === 0x42 && d[1] === 0x4D) return "image/bmp";
+    return null;
+  }
   function boxSize(d, o) {
     var size = readU32(d, o);
     if (size === 1) {
@@ -762,6 +774,7 @@
     demuxMp4: demuxMp4,
     isHeic: isHeic,
     parseHeic: parseHeic,
+    detectImageType: detectImageType,
     parseContainerInfo: parseContainerInfo,
     nalToAnnexB: nalToAnnexB
   };

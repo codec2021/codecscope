@@ -131,12 +131,14 @@
     if (currentCodec === "avc") return "AVC (Advanced Video Coding) / H.264";
     if (currentCodec === "hevc") return "HEVC (High Efficiency Video Coding) / H.265";
     if (currentCodec === "vvc") return "VVC (Versatile Video Coding) / H.266";
+    if (currentCodec === "image") return "Image (no bitstream syntax)";
     return "Unknown";
   }
   function codecShortName() {
     if (currentCodec === "avc") return "AVC";
     if (currentCodec === "hevc") return "HEVC";
     if (currentCodec === "vvc") return "VVC";
+    if (currentCodec === "image") return "Image";
     return "?";
   }
   function sampleEntryName(cc) {
@@ -1087,6 +1089,16 @@ timeline.addEventListener("click", function (e) {
         } else {
           loadAndDecodeHeic();
         }
+      } else if (currentImageBlob) {
+        createImageBitmap(currentImageBlob).then(function (bmp) {
+          drawVideoFrame(bmp);
+          previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
+          previewMsg.textContent = "";
+          heicDecoding = false;
+        }).catch(function () {
+          previewMsg.textContent = "Failed to decode image";
+          heicDecoding = false;
+        });
       } else {
         previewMsg.textContent = "No image data available";
         heicDecoding = false;
@@ -1137,6 +1149,7 @@ timeline.addEventListener("click", function (e) {
   function renderHdr(h) {
     hdrInfo.innerHTML = "";
     function row(k, v) {
+      if (v === undefined || v === null || v === "") return;
       var d = document.createElement("div");
       d.className = "kv-row";
       d.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + "</span>";
@@ -1282,6 +1295,10 @@ timeline.addEventListener("click", function (e) {
     play.frames = {};
     play.feedFrame = -1;
     heicDecoding = false;
+    timeline._frames = null;
+    timeline._slices = null;
+    timeline._nalToSlice = null;
+    timeline._xs = null;
     setStatus("Parsing " + file.name + " ...");
     fileNameEl.textContent = file.name + " (" + (file.size / 1024 / 1024).toFixed(2) + " MB)";
 
@@ -1293,7 +1310,28 @@ timeline.addEventListener("click", function (e) {
         var srcNote = "";
         var isImage = false;
         var imageW = 0, imageH = 0;
-        if (H26xDemux.isHeic(rawBytes)) {
+        var result = null;
+        var simpleImageType = H26xDemux.detectImageType(rawBytes);
+        if (simpleImageType) {
+          currentImageBlob = new Blob([rawBytes], { type: simpleImageType });
+          currentHeicRawBytes = null;
+          fileBytes = new Uint8Array(0);
+          currentDescription = null;
+          currentNalLengthSize = 4;
+          currentContainerInfo = null;
+          isImage = true;
+          srcNote = " (" + simpleImageType.split("/")[1].toUpperCase() + " image)";
+          result = {
+            codec: "image",
+            imageLabel: simpleImageType.split("/")[1].toUpperCase(),
+            data: {
+              nalus: [],
+              streamInfo: { nalus: 0, slices: 0, i: 0, p: 0, b: 0, profile: "N/A", level: "N/A" },
+              hdr: {},
+              warnings: []
+            }
+          };
+        } else if (H26xDemux.isHeic(rawBytes)) {
           var heic = H26xDemux.parseHeic(rawBytes);
           if (!heic || !heic.annexb.length) {
             setStatus("HEIC parse failed");
@@ -1325,7 +1363,7 @@ timeline.addEventListener("click", function (e) {
           currentNalLengthSize = 4;
           currentContainerInfo = null;
         }
-        var result = parseBuffer(fileBytes);
+        if (!result) result = parseBuffer(fileBytes);
         var t1 = performance.now();
         currentCodec = result.codec;
         currentData = result.data;
@@ -1345,10 +1383,9 @@ timeline.addEventListener("click", function (e) {
         computeFrames();
 
         var si = result.data.streamInfo;
-        var chroma = ["4:0:0", "4:2:0", "4:2:2", "4:4:4"][si.chromaFormat] || ("4:2:" + si.chromaFormat);
-        var badgeText = currentCodec.toUpperCase();
+        var badgeText = result.imageLabel || currentCodec.toUpperCase();
         if (si.bitDepth !== undefined) badgeText += " · " + si.bitDepth + "-bit";
-        if (si.chromaFormat !== undefined) badgeText += " · " + chroma;
+        if (si.chromaFormat !== undefined) badgeText += " · " + chromaFormatName(si.chromaFormat);
         codecBadge.textContent = badgeText;
         codecBadge.classList.remove("hidden");
         dropzone.classList.add("hidden");
