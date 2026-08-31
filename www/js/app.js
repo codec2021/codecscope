@@ -1885,16 +1885,35 @@ timeline.addEventListener("click", function (e) {
           imageH = heic.picHeight || 0;
           srcNote = " (HEIC image)";
         } else if (H26xDemux.isMp4(rawBytes)) {
-          var demuxed = H26xDemux.demuxMp4(rawBytes);
-          if (!demuxed || !demuxed.annexb.length) {
-            setStatus("MP4 demux failed: no video track found");
-            return;
+          var av1mp4 = H26xDemux.demuxAv1Mp4(rawBytes);
+          if (av1mp4 && av1mp4.frames && av1mp4.frames.length) {
+            fileBytes = rawBytes;
+            currentDescription = null;
+            currentNalLengthSize = 4;
+            currentContainerInfo = null;
+            currentAv1Frames = av1mp4.frames;
+            srcNote = " (AV1 MP4)";
+            result = {
+              codec: "av1",
+              data: {
+                nalus: av1mp4.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: -1, jpegSyntax: o.syntax }; }),
+                streamInfo: { nalus: av1mp4.obus.length, slices: av1mp4.frames.length, i: av1mp4.frames.length, p: 0, b: 0, profile: "AV1", level: String(av1mp4.level), picWidth: av1mp4.width, picHeight: av1mp4.height },
+                hdr: {},
+                warnings: []
+              }
+            };
+          } else {
+            var demuxed = H26xDemux.demuxMp4(rawBytes);
+            if (!demuxed || !demuxed.annexb.length) {
+              setStatus("MP4 demux failed: no video track found");
+              return;
+            }
+            fileBytes = demuxed.annexb;
+            currentDescription = demuxed.description || null;
+            currentNalLengthSize = demuxed.nalLengthSize || 4;
+            currentContainerInfo = H26xDemux.parseContainerInfo(rawBytes);
+            srcNote = " (MP4 demuxed)";
           }
-          fileBytes = demuxed.annexb;
-          currentDescription = demuxed.description || null;
-          currentNalLengthSize = demuxed.nalLengthSize || 4;
-          currentContainerInfo = H26xDemux.parseContainerInfo(rawBytes);
-          srcNote = " (MP4 demuxed)";
         } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes)) {
           var av1 = H26xDemux.parseIvf(rawBytes);
           if (!av1 || !av1.frames || !av1.frames.length) {

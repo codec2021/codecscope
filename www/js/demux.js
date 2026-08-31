@@ -369,6 +369,99 @@
     return { codec: codec, annexb: out, description: description, nalLengthSize: nalLengthSize };
   }
 
+  function demuxAv1Mp4(d) {
+    var moov = null, i = 0;
+    while (i + 8 <= d.length) {
+      var msize = boxSize(d, i);
+      if (msize < 8 || i + msize > d.length) break;
+      if (fourCC(d, i + 4) === "moov") { moov = { offset: i + 8, end: i + msize }; break; }
+      i += msize;
+    }
+    if (!moov) return null;
+
+    var trakStart = moov.offset;
+    var stsd = null, stsz = null, stsc = null, stco = null;
+    while (trakStart + 8 <= moov.end && !stsd) {
+      var trakSize = boxSize(d, trakStart);
+      if (trakSize < 8) break;
+      if (fourCC(d, trakStart + 4) === "trak") {
+        var trakEnd = trakStart + trakSize;
+        var mdia = findBox(d, trakStart + 8, trakEnd, "mdia");
+        if (mdia) {
+          var hdlr = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "hdlr");
+          if (hdlr && fourCC(d, hdlr.offset + 16) === "vide") {
+            var minf = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "minf");
+            if (minf) {
+              var stbl = findBox(d, minf.offset + 8, minf.offset + minf.size, "stbl");
+              if (stbl) {
+                stsd = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsd");
+                stsz = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsz");
+                stsc = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsc");
+                stco = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stco") || findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "co64");
+              }
+            }
+          }
+        }
+      }
+      trakStart += trakSize;
+    }
+    if (!stsd || !stsz || !stco) return null;
+    // 识别 av01
+    var fmt = fourCC(d, stsd.offset + 20);
+    if (fmt !== "av01") return null;
+
+    var sampleSizes = [];
+    var uniformSize = readU32(d, stsz.offset + 12);
+    var szCount = readU32(d, stsz.offset + 16);
+    if (uniformSize > 0) { for (var s1 = 0; s1 < szCount; s1++) sampleSizes.push(uniformSize); }
+    else { for (var s2 = 0; s2 < szCount; s2++) sampleSizes.push(readU32(d, stsz.offset + 20 + s2 * 4)); }
+
+    var chunkOffsets = [];
+    var coCount = readU32(d, stco.offset + 12);
+    var co64 = fourCC(d, stco.offset + 4) === "co64";
+    for (var c1 = 0; c1 < coCount; c1++) {
+      if (co64) chunkOffsets.push(readU32(d, stco.offset + 16 + c1 * 8) * 4294967296 + readU32(d, stco.offset + 20 + c1 * 8));
+      else chunkOffsets.push(readU32(d, stco.offset + 16 + c1 * 4));
+    }
+
+    var stscEntries = [];
+    if (stsc) {
+      var scCount = readU32(d, stsc.offset + 12);
+      for (var sc = 0; sc < scCount; sc++) stscEntries.push({ firstChunk: readU32(d, stsc.offset + 16 + sc * 12), samplesPerChunk: readU32(d, stsc.offset + 20 + sc * 12) });
+    } else stscEntries.push({ firstChunk: 1, samplesPerChunk: 1 });
+
+    var sampleOffsets = [];
+    var sampleIndex = 0, chunkIndex = 0, dataOffset = 0;
+    while (sampleIndex < sampleSizes.length && chunkIndex < chunkOffsets.length) {
+      var spc = 1;
+      for (var e = 0; e < stscEntries.length; e++) if (stscEntries[e].firstChunk <= chunkIndex + 1) spc = stscEntries[e].samplesPerChunk;
+      for (var k = 0; k < spc && sampleIndex < sampleSizes.length; k++) { sampleOffsets.push(chunkOffsets[chunkIndex] + dataOffset); dataOffset += sampleSizes[sampleIndex]; sampleIndex++; }
+      chunkIndex++; dataOffset = 0;
+    }
+
+    var frames = [], obus = [];
+    for (var si2 = 0; si2 < sampleOffsets.length; si2++) {
+      var off = sampleOffsets[si2], len = sampleSizes[si2];
+      if (off < 0 || off + len > d.length) continue;
+      var sample = d.subarray(off, off + len);
+      frames.push({ data: sample });
+      var obuList = parseAv1Obus(d, off, off + len);
+      for (var oi = 0; oi < obuList.length; oi++) obus.push(obuList[oi]);
+    }
+
+    var picW = 0, picH = 0, profile = 0, level = 0;
+    for (var k2 = 0; k2 < obus.length; k2++) {
+      if (obus[k2].type === 1) {
+        var sh = parseAv1SeqHdr(d, obus[k2].payloadStart, obus[k2].payloadEnd);
+        if (sh.width) { picW = sh.width; picH = sh.height; }
+        profile = sh.profile; level = sh.level;
+        break;
+      }
+    }
+
+    return { codec: "av1", frames: frames, obus: obus, width: picW, height: picH, profile: profile, level: level };
+  }
+
   function parseFragmentNals(d) {
     // 解析 fragmented MP4 的 moof/traf/trun，提取 length-prefixed NAL（不含 start code）
     var nals = [];
@@ -906,6 +999,7 @@
     isIvf: isIvf,
     isAv1AnnexB: isAv1AnnexB,
     parseIvf: parseIvf,
-    parseAv1Obus: parseAv1Obus
+    parseAv1Obus: parseAv1Obus,
+    demuxAv1Mp4: demuxAv1Mp4
   };
 })();
