@@ -42,6 +42,12 @@
     return { value: val, pos: pos };
   }
 
+  var AV1_COLOR_PRIMARIES = { 1: "BT.709", 2: "Unspecified", 4: "BT.470M", 5: "BT.470BG", 6: "BT.601", 7: "SMPTE 240", 8: "Generic film", 9: "BT.2020", 10: "XYZ", 11: "SMPTE 431", 12: "SMPTE 432", 22: "EBU 3213" };
+  var AV1_TRANSFER = { 1: "BT.709", 2: "Unspecified", 4: "BT.470M", 5: "BT.470BG", 6: "BT.601", 7: "SMPTE 240", 8: "Linear", 13: "sRGB", 14: "BT.2020 (10-bit)", 15: "BT.2020 (12-bit)", 16: "SMPTE 2084 (PQ)", 17: "SMPTE 428", 18: "HLG" };
+  var AV1_MATRIX = { 0: "Identity", 1: "BT.709", 2: "Unspecified", 4: "FCC", 5: "BT.470BG", 6: "BT.601", 7: "SMPTE 240", 9: "BT.2020 (NCL)", 10: "BT.2020 (CL)" };
+  var AV1_FRAME_TYPE = { 0: "KEY_FRAME", 1: "INTER_FRAME", 2: "INTRA_ONLY_FRAME", 3: "SWITCH_FRAME" };
+
+  // 解析 sequence header，返回完整字段 + 语法树
   function parseAv1SeqHdr(d, start, end) {
     var bitPos = start * 8, bitEnd = end * 8;
     function readBit() { if (bitPos >= bitEnd) return 0; var b = (d[bitPos >> 3] >> (7 - (bitPos & 7))) & 1; bitPos++; return b; }
@@ -49,39 +55,206 @@
     function uvlc() { var z = 0; while (readBit() === 0) z++; if (z >= 32) return 0; var v = 0; for (var i = 0; i < z; i++) v = (v << 1) | readBit(); return (1 << z) - 1 + v; }
 
     var tree = [];
+    var hdr = {};
+
     var profile = readBits(3);
-    tree.push({ n: "seq_profile = " + profile });
-    tree.push({ n: "still_picture = " + readBit() });
+    hdr.profile = profile;
+    tree.push({ n: "seq_profile = " + profile + " (" + ["Main", "High", "Professional"][profile] + ")" });
+
+    var still = readBit();
+    hdr.stillPicture = still;
+    tree.push({ n: "still_picture = " + still });
+
     var reduced = readBit();
+    hdr.reduced = reduced;
     tree.push({ n: "reduced_still_picture_header = " + reduced });
+
     var levelIdx = 0;
     if (!reduced) {
       var timing = readBit();
       tree.push({ n: "timing_info_present_flag = " + timing });
-      if (timing) { readBits(32); readBits(32); if (readBit()) uvlc(); }
-      var initial = readBit();
-      if (initial) readBits(4);
-      var opCnt = readBits(5);
-      for (var i = 0; i <= opCnt; i++) {
-        readBits(12);
-        levelIdx = readBits(5);
-        if (levelIdx > 7) readBits(1);
-        if (initial) readBits(4);
+      if (timing) {
+        var numUnits = readBits(32), timeScale = readBits(32);
+        tree.push({ n: "num_units_in_display_tick = " + numUnits });
+        tree.push({ n: "time_scale = " + timeScale });
+        var eq = readBit();
+        tree.push({ n: "equal_picture_interval = " + eq });
+        if (eq) { tree.push({ n: "num_ticks_per_picture_minus_1 = " + uvlc() }); }
       }
-      tree.push({ n: "operating_points = " + (opCnt + 1) + ", seq_level_idx = " + levelIdx });
+      var initial = readBit();
+      tree.push({ n: "initial_display_delay_present_flag = " + initial });
+      var opCnt = readBits(5);
+      tree.push({ n: "operating_points_cnt_minus_1 = " + opCnt });
+      for (var i = 0; i <= opCnt; i++) {
+        var opIdc = readBits(12);
+        levelIdx = readBits(5);
+        var tier = levelIdx > 7 ? readBits(1) : 0;
+        var initDelay = initial ? readBits(4) : 0;
+        tree.push({ n: "operating_point[" + i + "]: idc=" + opIdc + ", seq_level_idx=" + levelIdx + (levelIdx > 7 ? ", tier=" + tier : "") + (initial ? ", initial_display_delay=" + initDelay : "") });
+      }
     }
+    hdr.level = levelIdx;
+
     var fwBits = readBits(4) + 1;
     var fhBits = readBits(4) + 1;
+    tree.push({ n: "frame_width_bits_minus_1 = " + (fwBits - 1) });
+    tree.push({ n: "frame_height_bits_minus_1 = " + (fhBits - 1) });
     var maxW = readBits(fwBits) + 1;
     var maxH = readBits(fhBits) + 1;
-    tree.push({ n: "max_frame_width = " + maxW });
-    tree.push({ n: "max_frame_height = " + maxH });
-    return { tree: tree, profile: profile, level: levelIdx, width: maxW, height: maxH };
+    tree.push({ n: "max_frame_width_minus_1 = " + (maxW - 1) });
+    tree.push({ n: "max_frame_height_minus_1 = " + (maxH - 1) });
+    hdr.width = maxW; hdr.height = maxH;
+
+    var frameIdPresent = 0;
+    if (!reduced) {
+      frameIdPresent = readBit();
+      tree.push({ n: "frame_id_numbers_present_flag = " + frameIdPresent });
+      if (frameIdPresent) {
+        var delta = readBits(4), add = readBits(3);
+        tree.push({ n: "delta_frame_id_length_minus_2 = " + delta });
+        tree.push({ n: "additional_frame_id_length_minus_1 = " + add });
+      }
+    }
+    hdr.frameIdPresent = frameIdPresent;
+
+    tree.push({ n: "use_128x128_superblock = " + readBit() });
+    tree.push({ n: "enable_filter_intra = " + readBit() });
+    tree.push({ n: "enable_intra_edge_filter = " + readBit() });
+    tree.push({ n: "enable_interintra_compound = " + readBit() });
+    tree.push({ n: "enable_masked_compound = " + readBit() });
+    tree.push({ n: "enable_warped_motion = " + readBit() });
+    tree.push({ n: "enable_dual_filter = " + readBit() });
+
+    var orderHint = readBit();
+    hdr.orderHint = orderHint;
+    tree.push({ n: "enable_order_hint = " + orderHint });
+    if (orderHint) {
+      tree.push({ n: "enable_jnt_comp = " + readBit() });
+      tree.push({ n: "enable_ref_frame_mvs = " + readBit() });
+    }
+
+    var chooseScreen = readBit();
+    tree.push({ n: "seq_choose_screen_content_tools = " + chooseScreen });
+    var forceScreen = 0;
+    if (chooseScreen) {
+      forceScreen = readBit();
+      tree.push({ n: "seq_force_screen_content_tools = " + forceScreen });
+    }
+    if (forceScreen > 0) {
+      var chooseIntMv = readBit();
+      tree.push({ n: "seq_choose_integer_mv = " + chooseIntMv });
+      if (chooseIntMv) tree.push({ n: "seq_force_integer_mv = " + readBit() });
+    }
+    if (orderHint) {
+      var ohBits = readBits(3);
+      hdr.orderHintBits = ohBits;
+      tree.push({ n: "order_hint_bits_minus_1 = " + ohBits });
+    }
+
+    tree.push({ n: "enable_superres = " + readBit() });
+    tree.push({ n: "enable_cdef = " + readBit() });
+    tree.push({ n: "enable_restoration = " + readBit() });
+
+    // color_config
+    var colorCfg = [];
+    var highBd = readBit();
+    hdr.highBitdepth = highBd;
+    colorCfg.push({ n: "high_bitdepth = " + highBd });
+    var twelveBit = 0;
+    if (profile === 2 && highBd) { twelveBit = readBit(); colorCfg.push({ n: "twelve_bit = " + twelveBit }); }
+    var mono;
+    if (profile === 1) mono = 0;
+    else mono = readBit();
+    hdr.monochrome = mono;
+    colorCfg.push({ n: "monochrome = " + mono });
+    var colorDesc = readBit();
+    colorCfg.push({ n: "color_description_present_flag = " + colorDesc });
+    var cp = 2, tc = 2, mc = 2;
+    if (colorDesc) {
+      cp = readBits(8); tc = readBits(8); mc = readBits(8);
+      colorCfg.push({ n: "color_primaries = " + cp + " (" + (AV1_COLOR_PRIMARIES[cp] || "?") + ")" });
+      colorCfg.push({ n: "transfer_characteristics = " + tc + " (" + (AV1_TRANSFER[tc] || "?") + ")" });
+      colorCfg.push({ n: "matrix_coefficients = " + mc + " (" + (AV1_MATRIX[mc] || "?") + ")" });
+    }
+    var subX = 1, subY = 1, chromaPos = 0;
+    if (mono) {
+      colorCfg.push({ n: "color_range = " + readBit() });
+      subX = 1; subY = 1;
+    } else if (cp === 1 && tc === 13 && mc === 0) {
+      colorCfg.push({ n: "color_range = " + readBit() });
+      subX = 0; subY = 0;
+    } else {
+      colorCfg.push({ n: "color_range = " + readBit() });
+      if (profile === 0) { subX = 1; subY = 1; }
+      else if (profile === 1) { subX = 0; subY = 0; }
+      else { subX = 1; subY = twelveBit ? 1 : 0; }
+      chromaPos = readBits(2);
+      colorCfg.push({ n: "chroma_sample_position = " + chromaPos });
+    }
+    hdr.subsamplingX = subX; hdr.subsamplingY = subY;
+    colorCfg.push({ n: "subsampling_x = " + subX + ", subsampling_y = " + subY });
+    colorCfg.push({ n: "separate_uv_delta_q = " + readBit() });
+    tree.push({ n: "color_config", c: colorCfg });
+
+    var filmGrain = readBit();
+    hdr.filmGrainPresent = filmGrain;
+    tree.push({ n: "film_grain_params_present = " + filmGrain });
+
+    return { tree: tree, hdr: hdr, profile: profile, level: levelIdx, width: maxW, height: maxH };
+  }
+
+  // 解析 frame header（简化：关键字段）
+  function parseAv1FrameHdr(d, start, end, seq) {
+    var bitPos = start * 8, bitEnd = end * 8;
+    function readBit() { if (bitPos >= bitEnd) return 0; var b = (d[bitPos >> 3] >> (7 - (bitPos & 7))) & 1; bitPos++; return b; }
+    function readBits(n) { var v = 0; for (var i = 0; i < n; i++) v = (v << 1) | readBit(); return v; }
+    function uvlc() { var z = 0; while (readBit() === 0) z++; if (z >= 32) return 0; var v = 0; for (var i = 0; i < z; i++) v = (v << 1) | readBit(); return (1 << z) - 1 + v; }
+
+    var tree = [];
+    var showExisting = readBit();
+    tree.push({ n: "show_existing_frame = " + showExisting });
+    if (showExisting) {
+      tree.push({ n: "frame_to_show_map_idx = " + readBits(3) });
+      return tree;
+    }
+    var frameType = readBits(2);
+    tree.push({ n: "frame_type = " + frameType + " (" + (AV1_FRAME_TYPE[frameType] || "?") + ")" });
+    tree.push({ n: "show_frame = " + readBit() });
+    var showable = readBit();
+    tree.push({ n: "showable_frame = " + showable });
+    if (frameType === 3 /* SWITCH */) {
+      tree.push({ n: "error_resilient_mode = " + readBit() });
+      return tree;
+    }
+    var errorResilient = frameType === 0 /* KEY */ ? 1 : readBit();
+    tree.push({ n: "error_resilient_mode = " + errorResilient });
+    var disableCdf = readBit();
+    tree.push({ n: "disable_cdf_update = " + disableCdf });
+    if (seq && seq.reduced) {
+      tree.push({ n: "reduced_tx_set = 1" });
+      tree.push({ n: "allow_screen_content_tools = 1" });
+      tree.push({ n: "force_integer_mv = 1" });
+    } else {
+      tree.push({ n: "allow_screen_content_tools = " + readBit() });
+      var forceInt = readBit();
+      tree.push({ n: "force_integer_mv = " + forceInt });
+    }
+    var allowIntrabc = 0;
+    if (frameType === 0 /* KEY */) {
+      tree.push({ n: "allow_intrabc = 0" });
+    } else {
+      allowIntrabc = readBit();
+      tree.push({ n: "allow_intrabc = " + allowIntrabc });
+    }
+    // 剩余字段太复杂，停止解析（用省略号表示）
+    tree.push({ n: "..." });
+    return tree;
   }
 
   function parseAv1Obus(d, start, end) {
     var obus = [];
     var pos = start;
+    var seqHdr = null;
     while (pos + 1 <= end) {
       var obuStart = pos;
       var hdr = d[pos];
@@ -99,10 +272,26 @@
       if (type === 0 || forbidden) { pos = payloadEnd; continue; } // reserved
 
       var name = AV1_OBU_NAMES[type] || ("OBU_" + type);
-      var syntax = { n: name };
+      var headerInfo = [
+        { n: "obu_forbidden_bit = " + forbidden },
+        { n: "obu_type = " + type + " (" + name + ")" },
+        { n: "obu_extension_flag = " + extension },
+        { n: "obu_has_size_field = " + hasSize },
+        { n: "obu_size = " + size }
+      ];
+      var syntax = { n: name, c: headerInfo };
       if (type === 1) {
         var sh = parseAv1SeqHdr(d, payloadStart, payloadEnd);
-        syntax.c = sh.tree;
+        seqHdr = sh.hdr;
+        syntax.c = headerInfo.concat([{ n: "payload", c: sh.tree }]);
+      } else if (type === 3 || type === 7) { // frame header / redundant frame header
+        var fh = parseAv1FrameHdr(d, payloadStart, payloadEnd, seqHdr);
+        syntax.c = headerInfo.concat([{ n: "payload", c: fh }]);
+      } else if (type === 6) { // frame (含 frame header + tile group)
+        var fh6 = parseAv1FrameHdr(d, payloadStart, payloadEnd, seqHdr);
+        syntax.c = headerInfo.concat([{ n: "payload", c: fh6.concat([{ n: "tile_group (coded tile data, " + size + " bytes)" }]) }]);
+      } else if (type === 4) { // tile group
+        syntax.c = headerInfo.concat([{ n: "payload (" + size + " bytes of coded tile data)" }]);
       }
       obus.push({ offset: obuStart, length: payloadEnd - obuStart, type: type, typeName: name, info: name, color: AV1_OBU_COLORS[type] || "#4d94e8", syntax: syntax, payloadStart: payloadStart, payloadEnd: payloadEnd });
       pos = payloadEnd;
