@@ -1914,8 +1914,8 @@ timeline.addEventListener("click", function (e) {
             currentContainerInfo = H26xDemux.parseContainerInfo(rawBytes);
             srcNote = " (MP4 demuxed)";
           }
-        } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes)) {
-          var av1 = H26xDemux.parseIvf(rawBytes);
+        } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes) || H26xDemux.isWebm(rawBytes)) {
+          var av1 = H26xDemux.isWebm(rawBytes) ? H26xDemux.demuxWebm(rawBytes) : H26xDemux.parseIvf(rawBytes);
           if (!av1 || !av1.frames || !av1.frames.length) {
             setStatus("AV1 parse failed");
             return;
@@ -1925,7 +1925,7 @@ timeline.addEventListener("click", function (e) {
           currentNalLengthSize = 4;
           currentContainerInfo = null;
           currentAv1Frames = av1.frames;
-          srcNote = " (AV1 IVF)";
+          srcNote = " (AV1)";
           result = {
             codec: "av1",
             data: {

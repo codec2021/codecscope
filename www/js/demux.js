@@ -462,6 +462,129 @@
     return { codec: "av1", frames: frames, obus: obus, width: picW, height: picH, profile: profile, level: level };
   }
 
+  // ---------- WebM/Matroska (EBML) ----------
+  function isWebm(d) { return d.length >= 4 && d[0] === 0x1A && d[1] === 0x45 && d[2] === 0xDF && d[3] === 0xA3; }
+
+  function readVint(d, pos) {
+    var b = d[pos], mask = 0x80, len = 0;
+    while (mask && !(b & mask)) { len++; mask >>= 1; }
+    len++;
+    var value = b & (mask - 1);
+    for (var i = 1; i < len; i++) value = value * 256 + d[pos + i];
+    return { value: value, len: len, end: pos + len };
+  }
+
+  function demuxWebm(d) {
+    if (!isWebm(d)) return null;
+    var pos = 0;
+    var el = readVint(d, pos);                     // EBML id
+    var sz = readVint(d, el.end);                  // EBML size
+    pos = sz.end + sz.value;
+
+    var width = 0, height = 0, isAv1 = false, codecId = "";
+    var frames = [], obus = [];
+
+    // 读 Segment
+    if (pos + 2 > d.length) return null;
+    el = readVint(d, pos);                          // Segment id
+    sz = readVint(d, el.end);                       // Segment size
+    var segStart = sz.end;
+    var segEnd = segStart + sz.value;
+    if (segEnd > d.length) segEnd = d.length;
+    pos = segStart;
+
+    while (pos < segEnd) {
+      el = readVint(d, pos); var id = el.value;
+      sz = readVint(d, el.end);
+      var elemStart = sz.end;
+      var elemEnd = elemStart + sz.value;
+      if (sz.value < 0 || elemEnd > segEnd) break;
+      var dataEnd = elemEnd;
+
+      if (id === 0x654AE6B) { // Tracks
+        var tp = elemStart;
+        while (tp + 2 <= dataEnd) {
+          var te = readVint(d, tp); var tid = te.value; tp = te.end;
+          var tsz = readVint(d, tp); tp = tsz.end;
+          if (tsz.value < 0 || tp + tsz.value > dataEnd) break;
+          var tEnd = tp + tsz.value;
+          if (tid === 0x2E) { // TrackEntry
+            codecId = ""; width = 0; height = 0;
+            var cp = tp;
+            while (cp + 2 <= tEnd) {
+              var ce = readVint(d, cp); var cid = ce.value; cp = ce.end;
+              var csz = readVint(d, cp); cp = csz.end;
+              if (csz.value < 0 || cp + csz.value > tEnd) break;
+              if (cid === 0x06) codecId = String.fromCharCode.apply(null, Array.prototype.slice.call(d.subarray(cp, cp + csz.value)));
+              else if (cid === 0x60) { // Video
+                var vp = cp, vend = cp + csz.value;
+                while (vp + 2 <= vend) {
+                  var ve = readVint(d, vp); var vid = ve.value; vp = ve.end;
+                  var vsz = readVint(d, vp); vp = vsz.end;
+                  if (vsz.value < 0) break;
+                  if (vid === 0x30) width = (d[vp] << 8) | d[vp + 1];
+                  else if (vid === 0x3A) height = (d[vp] << 8) | d[vp + 1];
+                  vp += vsz.value;
+                }
+              }
+              cp += csz.value;
+            }
+            if (codecId === "V_AV1") isAv1 = true;
+          }
+          tp = tEnd;
+        }
+      }
+      else if (id === 0xF43B675 && isAv1) { // Cluster
+        var cp = elemStart;
+        while (cp + 2 <= dataEnd) {
+          var ce = readVint(d, cp); var cid = ce.value;
+          var csz = readVint(d, ce.end);
+          var elemStart = csz.end;
+          var elemEnd = elemStart + csz.value;
+          if (csz.value < 0 || elemEnd > dataEnd) break;
+          if (cid === 0x23) { // SimpleBlock
+            var tn = readVint(d, elemStart);
+            var fp = tn.end + 2 + 1;  // track number + timestamp(2) + flags(1)
+            var frameLen = csz.value - (fp - elemStart);
+            if (frameLen > 0 && fp + frameLen <= dataEnd) {
+              frames.push({ data: d.subarray(fp, fp + frameLen) });
+            }
+          }
+          cp = elemEnd;
+        }
+      }
+      pos = dataEnd;
+    }
+
+    if (!isAv1 || frames.length === 0) return null;
+
+    for (var f = 0; f < frames.length; f++) {
+      var fd = frames[f].data;
+      var absOff = -1;
+      for (var a = 0; a + 8 <= d.length; a++) {
+        var m = true;
+        for (var b2 = 0; b2 < Math.min(8, fd.length); b2++) { if (d[a + b2] !== fd[b2]) { m = false; break; } }
+        if (m) { absOff = a; break; }
+      }
+      if (absOff >= 0) {
+        var obuList = parseAv1Obus(d, absOff, absOff + fd.length);
+        for (var oi = 0; oi < obuList.length; oi++) obus.push(obuList[oi]);
+      }
+    }
+
+    var picW = width, picH = height, profile = 0, level = 0;
+    for (var k = 0; k < obus.length; k++) {
+      if (obus[k].type === 1) {
+        var sh = parseAv1SeqHdr(d, obus[k].payloadStart, obus[k].payloadEnd);
+        if (sh.width) { picW = sh.width; picH = sh.height; }
+        profile = sh.profile; level = sh.level;
+        break;
+      }
+    }
+
+    return { codec: "av1", frames: frames, obus: obus, width: picW, height: picH, profile: profile, level: level };
+  }
+
   function parseFragmentNals(d) {
     // 解析 fragmented MP4 的 moof/traf/trun，提取 length-prefixed NAL（不含 start code）
     var nals = [];
@@ -1000,6 +1123,8 @@
     isAv1AnnexB: isAv1AnnexB,
     parseIvf: parseIvf,
     parseAv1Obus: parseAv1Obus,
-    demuxAv1Mp4: demuxAv1Mp4
+    demuxAv1Mp4: demuxAv1Mp4,
+    isWebm: isWebm,
+    demuxWebm: demuxWebm
   };
 })();
