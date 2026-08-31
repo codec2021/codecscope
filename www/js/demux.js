@@ -736,7 +736,7 @@
             var fp = tn.end + 2 + 1;  // track number + timestamp(2) + flags(1)
             var frameLen = csz.value - (fp - elemStart);
             if (frameLen > 0 && fp + frameLen <= dataEnd) {
-              frames.push({ data: d.subarray(fp, fp + frameLen) });
+              frames.push({ data: d.subarray(fp, fp + frameLen), absOff: fp });
             }
           }
           cp = elemEnd;
@@ -749,12 +749,7 @@
 
     for (var f = 0; f < frames.length; f++) {
       var fd = frames[f].data;
-      var absOff = -1;
-      for (var a = 0; a + 8 <= d.length; a++) {
-        var m = true;
-        for (var b2 = 0; b2 < Math.min(8, fd.length); b2++) { if (d[a + b2] !== fd[b2]) { m = false; break; } }
-        if (m) { absOff = a; break; }
-      }
+      var absOff = frames[f].absOff;
       if (absOff >= 0) {
         var obuList = parseAv1Obus(d, absOff, absOff + fd.length);
         for (var oi = 0; oi < obuList.length; oi++) obus.push(obuList[oi]);
@@ -869,6 +864,94 @@
       b += 4;
     }
     return false;
+  }
+
+  function isAvif(d) {
+    if (d.length < 12 || fourCC(d, 4) !== "ftyp") return false;
+    var major = fourCC(d, 8);
+    if (major === "avif" || major === "avis") return true;
+    var end = boxSize(d, 0);
+    var b = 16;
+    while (b + 4 <= end && b + 4 <= d.length) {
+      var cc = fourCC(d, b);
+      if (cc === "avif" || cc === "avis") return true;
+      b += 4;
+    }
+    return false;
+  }
+
+  function parseAvif(d) {
+    // 解析 AVIF 图片：meta → iprp/ipco 的 ispe + av1C，iloc 的图片数据（AV1 OBU）
+    var meta = findBox(d, 0, d.length, "meta");
+    if (!meta) return null;
+    var metaContent = meta.offset + 12;
+    var metaEnd = meta.offset + meta.size;
+
+    // ispe 分辨率
+    var ispeOff = null;
+    var iprp = findBox(d, metaContent, metaEnd, "iprp");
+    if (iprp) {
+      var ipco = findBox(d, iprp.offset + 8, iprp.offset + iprp.size, "ipco");
+      if (ipco) {
+        var bp = ipco.offset + 8, ipcoEnd = ipco.offset + ipco.size;
+        while (bp + 8 <= ipcoEnd) {
+          var bsz = boxSize(d, bp);
+          if (bsz < 8 || bp + bsz > ipcoEnd) break;
+          if (fourCC(d, bp + 4) === "ispe" && !ispeOff) ispeOff = bp;
+          bp += bsz;
+        }
+      }
+    }
+
+    // iloc 提取图片数据
+    var iloc = findBox(d, metaContent, metaEnd, "iloc");
+    var imageData = null, imageOff = 0;
+    if (iloc) {
+      var p = iloc.offset + 8;
+      var version = d[p]; p++; p += 3;
+      var offsetSize = d[p] >> 4, lengthSize = d[p] & 0x0F; p++;
+      var baseOffsetSize = d[p] >> 4, indexSize = (version === 1 || version === 2) ? (d[p] & 0x0F) : 0; p++;
+      var itemCount = (version < 2) ? readU16(d, p) : readU32(d, p); p += (version < 2 ? 2 : 4);
+      for (var qi = 0; qi < itemCount; qi++) {
+        p += (version < 2 ? 2 : 4); // itemId
+        var constructionMethod = 0;
+        if (version === 1 || version === 2) { constructionMethod = readU16(d, p) & 0x0F; p += 2; }
+        p += 2;
+        var baseOffset = 0;
+        for (var kb = 0; kb < baseOffsetSize; kb++) { baseOffset = baseOffset * 256 + d[p]; p++; }
+        var extentCount = readU16(d, p); p += 2;
+        var extents = [];
+        for (var qe = 0; qe < extentCount; qe++) {
+          if (indexSize > 0) p += indexSize;
+          var eoff = 0, elen = 0;
+          for (var ko = 0; ko < offsetSize; ko++) { eoff = eoff * 256 + d[p]; p++; }
+          for (var kl = 0; kl < lengthSize; kl++) { elen = elen * 256 + d[p]; p++; }
+          extents.push({ offset: baseOffset + eoff, length: elen });
+        }
+        if (constructionMethod === 0 && extents.length > 0 && !imageData) {
+          imageOff = extents[0].offset;
+          var ilen = extents[0].length;
+          if (imageOff >= 0 && imageOff + ilen <= d.length) imageData = d.subarray(imageOff, imageOff + ilen);
+        }
+      }
+    }
+    if (!imageData) return null;
+
+    // 解析 AV1 OBU
+    var obus = parseAv1Obus(d, imageOff, imageOff + imageData.length);
+
+    var picW = 0, picH = 0, profile = 0, level = 0;
+    if (ispeOff) { picW = readU32(d, ispeOff + 12); picH = readU32(d, ispeOff + 16); }
+    for (var k = 0; k < obus.length; k++) {
+      if (obus[k].type === 1) {
+        var sh = parseAv1SeqHdr(d, obus[k].payloadStart, obus[k].payloadEnd);
+        if (sh.width && !picW) { picW = sh.width; picH = sh.height; }
+        profile = sh.profile; level = sh.level;
+        break;
+      }
+    }
+
+    return { codec: "av1", frames: [{ data: imageData, absOff: imageOff }], obus: obus, width: picW, height: picH, profile: profile, level: level, isImage: true };
   }
 
   function parseHeic(d) {
@@ -1314,6 +1397,8 @@
     parseAv1Obus: parseAv1Obus,
     demuxAv1Mp4: demuxAv1Mp4,
     isWebm: isWebm,
-    demuxWebm: demuxWebm
+    demuxWebm: demuxWebm,
+    isAvif: isAvif,
+    parseAvif: parseAvif
   };
 })();

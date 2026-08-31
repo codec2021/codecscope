@@ -1520,7 +1520,10 @@ timeline.addEventListener("click", function (e) {
       heicDecoding = true;
       previewHint.textContent = "Decoding image...";
       previewMsg.textContent = "";
-      if (currentHeicRawBytes) {
+      if (currentAv1Frames && currentAv1Frames.length) {
+        heicDecoding = false;
+        decodeAv1Frame(0);
+      } else if (currentHeicRawBytes) {
         if (typeof libheif !== "undefined") {
           decodeWithLibheif();
         } else if (currentImageBlob) {
@@ -1865,6 +1868,30 @@ timeline.addEventListener("click", function (e) {
             data: {
               nalus: [],
               streamInfo: { nalus: 0, slices: 0, i: 0, p: 0, b: 0, profile: "N/A", level: "N/A" },
+              hdr: {},
+              warnings: []
+            }
+          };
+        } else if (H26xDemux.isAvif(rawBytes)) {
+          var avif = H26xDemux.parseAvif(rawBytes);
+          if (!avif || !avif.frames || !avif.frames.length) {
+            setStatus("AVIF parse failed");
+            return;
+          }
+          fileBytes = rawBytes;
+          currentDescription = null;
+          currentNalLengthSize = 4;
+          currentContainerInfo = null;
+          currentAv1Frames = avif.frames;
+          isImage = true;
+          imageW = avif.width || 0;
+          imageH = avif.height || 0;
+          srcNote = " (AVIF image)";
+          result = {
+            codec: "av1",
+            data: {
+              nalus: avif.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: -1, jpegSyntax: o.syntax }; }),
+              streamInfo: { nalus: avif.obus.length, slices: avif.frames.length, i: avif.frames.length, p: 0, b: 0, profile: "AV1", level: String(avif.level), picWidth: avif.width, picHeight: avif.height },
               hdr: {},
               warnings: []
             }
