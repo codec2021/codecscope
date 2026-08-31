@@ -5,6 +5,12 @@
   function readU16(d, o) { return (d[o] << 8) | d[o + 1]; }
   function fourCC(d, o) { return String.fromCharCode(d[o], d[o + 1], d[o + 2], d[o + 3]); }
   function isMp4(d) { return d.length >= 12 && fourCC(d, 4) === "ftyp"; }
+  function isIvf(d) { return d.length >= 32 && d[0] === 0x44 && d[1] === 0x4B && d[2] === 0x49 && d[3] === 0x46; } // "DKIF"
+  function isAv1AnnexB(d) {
+    if (d.length < 2) return false;
+    var t = (d[0] >> 3) & 0xF;
+    return t === 2 || t === 1;
+  }
   function detectImageType(d) {
     // 检测浏览器可原生解码的图片格式，返回 MIME 类型或 null
     if (d.length >= 8 && d[0] === 0x89 && d[1] === 0x50 && d[2] === 0x4E && d[3] === 0x47 &&
@@ -16,6 +22,127 @@
         d[8] === 0x57 && d[9] === 0x45 && d[10] === 0x42 && d[11] === 0x50) return "image/webp";
     if (d.length >= 2 && d[0] === 0x42 && d[1] === 0x4D) return "image/bmp";
     return null;
+  }
+
+  // ---------- AV1 OBU 解析 ----------
+  var AV1_OBU_NAMES = {
+    1: "OBU_SEQUENCE_HEADER", 2: "OBU_TEMPORAL_DELIMITER", 3: "OBU_FRAME_HEADER",
+    4: "OBU_TILE_GROUP", 5: "OBU_METADATA", 6: "OBU_FRAME", 7: "OBU_REDUNDANT_FRAME_HEADER",
+    8: "OBU_TILE_LIST", 15: "OBU_PADDING"
+  };
+  var AV1_OBU_COLORS = { 1: "#FF8888", 3: "#CD9B1D", 6: "#CD9B1D", 4: "#00B050", 2: "#888" };
+
+  function readLeb128(d, pos) {
+    var val = 0, shift = 0, b;
+    do {
+      b = d[pos++];
+      val |= (b & 0x7F) << shift;
+      shift += 7;
+    } while (b & 0x80);
+    return { value: val, pos: pos };
+  }
+
+  function parseAv1SeqHdr(d, start, end) {
+    var bitPos = start * 8, bitEnd = end * 8;
+    function readBit() { if (bitPos >= bitEnd) return 0; var b = (d[bitPos >> 3] >> (7 - (bitPos & 7))) & 1; bitPos++; return b; }
+    function readBits(n) { var v = 0; for (var i = 0; i < n; i++) v = (v << 1) | readBit(); return v; }
+    function uvlc() { var z = 0; while (readBit() === 0) z++; if (z >= 32) return 0; var v = 0; for (var i = 0; i < z; i++) v = (v << 1) | readBit(); return (1 << z) - 1 + v; }
+
+    var tree = [];
+    var profile = readBits(3);
+    tree.push({ n: "seq_profile = " + profile });
+    tree.push({ n: "still_picture = " + readBit() });
+    var reduced = readBit();
+    tree.push({ n: "reduced_still_picture_header = " + reduced });
+    var levelIdx = 0;
+    if (!reduced) {
+      var timing = readBit();
+      tree.push({ n: "timing_info_present_flag = " + timing });
+      if (timing) { readBits(32); readBits(32); if (readBit()) uvlc(); }
+      var initial = readBit();
+      if (initial) readBits(4);
+      var opCnt = readBits(5);
+      for (var i = 0; i <= opCnt; i++) {
+        readBits(12);
+        levelIdx = readBits(5);
+        if (levelIdx > 7) readBits(1);
+        if (initial) readBits(4);
+      }
+      tree.push({ n: "operating_points = " + (opCnt + 1) + ", seq_level_idx = " + levelIdx });
+    }
+    var fwBits = readBits(4) + 1;
+    var fhBits = readBits(4) + 1;
+    var maxW = readBits(fwBits) + 1;
+    var maxH = readBits(fhBits) + 1;
+    tree.push({ n: "max_frame_width = " + maxW });
+    tree.push({ n: "max_frame_height = " + maxH });
+    return { tree: tree, profile: profile, level: levelIdx, width: maxW, height: maxH };
+  }
+
+  function parseAv1Obus(d, start, end) {
+    var obus = [];
+    var pos = start;
+    while (pos + 1 <= end) {
+      var obuStart = pos;
+      var hdr = d[pos];
+      var forbidden = (hdr >> 7) & 1;
+      var type = (hdr >> 3) & 0xF;
+      var extension = (hdr >> 2) & 1;
+      var hasSize = (hdr >> 1) & 1;
+      pos++;
+      if (extension) pos++;
+      var size = 0;
+      if (hasSize) { var lb = readLeb128(d, pos); pos = lb.pos; size = lb.value; }
+      else size = end - pos;
+      var payloadStart = pos;
+      var payloadEnd = Math.min(payloadStart + size, end);
+      if (type === 0 || forbidden) { pos = payloadEnd; continue; } // reserved
+
+      var name = AV1_OBU_NAMES[type] || ("OBU_" + type);
+      var syntax = { n: name };
+      if (type === 1) {
+        var sh = parseAv1SeqHdr(d, payloadStart, payloadEnd);
+        syntax.c = sh.tree;
+      }
+      obus.push({ offset: obuStart, length: payloadEnd - obuStart, type: type, typeName: name, info: name, color: AV1_OBU_COLORS[type] || "#4d94e8", syntax: syntax, payloadStart: payloadStart, payloadEnd: payloadEnd });
+      pos = payloadEnd;
+    }
+    return obus;
+  }
+
+  function parseIvf(d) {
+    if (!isIvf(d)) return null;
+    var hdrSize = d[6] | (d[7] << 8);
+    var width = d[12] | (d[13] << 8);
+    var height = d[14] | (d[15] << 8);
+    var fourcc = fourCC(d, 8);
+    if (fourcc !== "AV01" && fourcc !== "AV02") return null;
+
+    var frames = [];
+    var obus = [];
+    var pos = hdrSize;
+    while (pos + 12 <= d.length) {
+      var sz = (d[pos] | (d[pos + 1] << 8) | (d[pos + 2] << 16) | (d[pos + 3] << 24)) >>> 0;
+      pos += 12; // size(4) + timestamp(8)
+      if (sz <= 0 || pos + sz > d.length) break;
+      frames.push({ data: d.subarray(pos, pos + sz) });
+      var obuList = parseAv1Obus(d, pos, pos + sz);
+      for (var i = 0; i < obuList.length; i++) obus.push(obuList[i]);
+      pos += sz;
+    }
+
+    // 从 sequence header 提取分辨率
+    var picW = width, picH = height, profile = 0, level = 0;
+    for (var k = 0; k < obus.length; k++) {
+      if (obus[k].type === 1) {
+        var sh = parseAv1SeqHdr(d, obus[k].payloadStart, obus[k].payloadEnd);
+        if (sh.width) { picW = sh.width; picH = sh.height; }
+        profile = sh.profile; level = sh.level;
+        break;
+      }
+    }
+
+    return { codec: "av1", frames: frames, obus: obus, width: picW, height: picH, profile: profile, level: level };
   }
   function boxSize(d, o) {
     var size = readU32(d, o);
@@ -775,6 +902,10 @@
     parseHeic: parseHeic,
     detectImageType: detectImageType,
     parseContainerInfo: parseContainerInfo,
-    nalToAnnexB: nalToAnnexB
+    nalToAnnexB: nalToAnnexB,
+    isIvf: isIvf,
+    isAv1AnnexB: isAv1AnnexB,
+    parseIvf: parseIvf,
+    parseAv1Obus: parseAv1Obus
   };
 })();

@@ -131,6 +131,7 @@
     if (currentCodec === "avc") return "AVC (Advanced Video Coding) / H.264";
     if (currentCodec === "hevc") return "HEVC (High Efficiency Video Coding) / H.265";
     if (currentCodec === "vvc") return "VVC (Versatile Video Coding) / H.266";
+    if (currentCodec === "av1") return "AV1 (AOMedia Video 1)";
     if (currentCodec === "jpeg") return "JPEG (Joint Photographic Experts Group)";
     if (currentCodec === "image") return "Image (no bitstream syntax)";
     return "Unknown";
@@ -139,6 +140,7 @@
     if (currentCodec === "avc") return "AVC";
     if (currentCodec === "hevc") return "HEVC";
     if (currentCodec === "vvc") return "VVC";
+    if (currentCodec === "av1") return "AV1";
     if (currentCodec === "jpeg") return "JPEG";
     if (currentCodec === "image") return "Image";
     return "?";
@@ -921,13 +923,17 @@ timeline.addEventListener("click", function (e) {
     if (vvdecPlay.timer) { clearInterval(vvdecPlay.timer); vvdecPlay.timer = null; }
     vvdecPlay.active = false;
     if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
+    if (av1Play.timer) { clearInterval(av1Play.timer); av1Play.timer = null; }
+    av1Play.active = false;
+    if (av1Play.decoder) { try { av1Play.decoder.delete(); } catch (e) {} av1Play.decoder = null; }
     previewPlayBtn.textContent = "▶ Play";
   }
 
   function startPlayback() {
-    if (play.active || vvdecPlay.active) { stopPlayback(); return; }
+    if (play.active || vvdecPlay.active || av1Play.active) { stopPlayback(); return; }
     if (currentData && currentData.isImage) { return; }
     if (currentCodec === "vvc") { startVvcPlayback(); return; }
+    if (currentCodec === "av1") { startAv1Playback(); return; }
     var frames = timeline._frames;
     if (!frames || frames.length === 0) return;
     var fi = 0;
@@ -1316,6 +1322,123 @@ timeline.addEventListener("click", function (e) {
     }
   }
 
+  // ---------- AV1 dav1d 解码 ----------
+  var dav1dModule = null;
+  var dav1dLoading = false;
+  var dav1dPending = [];
+  var currentAv1Frames = null;
+
+  function loadDav1d(cb) {
+    if (dav1dModule) { cb(); return; }
+    dav1dPending.push(cb);
+    if (dav1dLoading) return;
+    dav1dLoading = true;
+    previewMsg.textContent = "Loading AV1 decoder (dav1d)...";
+    var s = document.createElement("script");
+    s.src = "js/dav1dapp.js";
+    s.onload = function () {
+      if (typeof CreateDav1dModule !== "function") {
+        dav1dLoading = false; dav1dPending = [];
+        previewMsg.textContent = "AV1 decoder module not found";
+        return;
+      }
+      CreateDav1dModule({ locateFile: function (f) { return "js/" + f; } }).then(function (m) {
+        dav1dModule = m; dav1dLoading = false;
+        var cbs = dav1dPending; dav1dPending = [];
+        cbs.forEach(function (f) { f(); });
+      }).catch(function (e) {
+        dav1dLoading = false; dav1dPending = [];
+        previewMsg.textContent = "AV1 decoder init failed: " + (e && e.message ? e.message : e);
+      });
+    };
+    s.onerror = function () {
+      dav1dLoading = false; dav1dPending = [];
+      previewMsg.textContent = "Failed to load AV1 decoder";
+    };
+    document.head.appendChild(s);
+  }
+
+  var av1Play = {
+    active: false,
+    timer: null,
+    decoder: null,
+    frameIdx: 0
+  };
+
+  function drawAv1Frame(img, frameIdx) {
+    var c = previewCanvas;
+    var tmp = document.createElement("canvas");
+    tmp.width = img.width; tmp.height = img.height;
+    tmp.getContext("2d").putImageData(img, 0, 0);
+    var maxW = previewView.clientWidth - 32, maxH = 480;
+    if (maxW < 160) maxW = 160;
+    var scale = Math.min(1, maxW / img.width, maxH / img.height);
+    c.width = Math.max(1, Math.round(img.width * scale));
+    c.height = Math.max(1, Math.round(img.height * scale));
+    c.getContext("2d").drawImage(tmp, 0, 0, c.width, c.height);
+    previewHint.textContent = "Frame " + (frameIdx !== undefined ? frameIdx : "?") + " (" + img.width + " x " + img.height + ", AV1)";
+    previewMsg.textContent = "";
+    previewCanvasTouched = true;
+    if (frameIdx !== undefined && timeline._slices && timeline._frames) {
+      var f = timeline._frames[frameIdx];
+      if (f) { updatePlayProgress(f.first); highlightFrame(f.first); }
+    }
+  }
+
+  function startAv1Playback() {
+    if (av1Play.active) { stopPlayback(); return; }
+    if (dav1dLoading) return;
+    if (!currentAv1Frames || currentAv1Frames.length === 0) return;
+    loadDav1d(function () {
+      if (av1Play.active) return;
+      var M = dav1dModule;
+      av1Play.decoder = new M.Decoder(0);
+      av1Play.frameIdx = 0;
+      av1Play.active = true;
+      previewPlayBtn.textContent = "⏸ Pause";
+      previewMsg.textContent = "";
+      resetPlayProgress(timeline._frames && timeline._frames.length ? timeline._frames[0].first : -1);
+      var iv = 33;
+      if (currentData && currentData.streamInfo) {
+        var fpsN = parseFloat(currentData.streamInfo.fps);
+        if (fpsN > 0) iv = Math.max(1, Math.round(1000 / fpsN));
+      }
+      av1Play.timer = setInterval(function () {
+        if (!av1Play.active || !av1Play.decoder) return;
+        var total = currentAv1Frames.length;
+        if (av1Play.frameIdx >= total) { stopPlayback(); return; }
+        av1Play.decoder.send(currentAv1Frames[av1Play.frameIdx].data);
+        var img;
+        while ((img = av1Play.decoder.get_rgba()) !== null) {
+          drawAv1Frame(img, av1Play.frameIdx);
+        }
+        av1Play.frameIdx++;
+      }, iv);
+    });
+  }
+
+  function decodeAv1Frame(fi) {
+    loadDav1d(function () {
+      var M = dav1dModule;
+      if (!currentAv1Frames || currentAv1Frames.length === 0) return;
+      var decoder = new M.Decoder(0);
+      var lastImg = null, lastIdx = 0;
+      try {
+        for (var k = 0; k <= fi && k < currentAv1Frames.length; k++) {
+          decoder.send(currentAv1Frames[k].data);
+          var img;
+          while ((img = decoder.get_rgba()) !== null) { lastImg = img; lastIdx = k; }
+        }
+        if (lastImg) drawAv1Frame(lastImg, lastIdx);
+        else previewMsg.textContent = "AV1 decode: no output";
+      } catch (e) {
+        previewMsg.textContent = "AV1 decode error: " + e.message;
+      } finally {
+        try { decoder.delete(); } catch (e2) {}
+      }
+    });
+  }
+
   function loadAndDecodeHeic() {
     if (libheifModule) { decodeWithLibheif(); return; }
     if (typeof libheif === "function") { initLibheif(); return; }
@@ -1428,6 +1551,17 @@ timeline.addEventListener("click", function (e) {
     }
     heicDecoding = false;
     if (!timeline._slices) return;
+    if (currentCodec === "av1") {
+      var aframes0 = timeline._frames;
+      if (!aframes0 || aframes0.length === 0) return;
+      var afi0 = frameIndexOfSlice(sliceIndex);
+      if (afi0 < 0) afi0 = 0;
+      if (play.active || vvdecPlay.active || av1Play.active) stopPlayback();
+      previewMsg.textContent = "";
+      previewHint.textContent = "Decoding AV1...";
+      decodeAv1Frame(afi0);
+      return;
+    }
     if (currentCodec === "vvc") {
       var frames0 = timeline._frames;
       if (!frames0 || frames0.length === 0) return;
@@ -1628,6 +1762,9 @@ timeline.addEventListener("click", function (e) {
     if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
     vvdecPlay.nalIdx = 0;
     vvdecPlay.cts = 0;
+    if (av1Play.decoder) { try { av1Play.decoder.delete(); } catch (e) {} av1Play.decoder = null; }
+    av1Play.frameIdx = 0;
+    currentAv1Frames = null;
     heicDecoding = false;
 
     currentData = null;
@@ -1758,6 +1895,27 @@ timeline.addEventListener("click", function (e) {
           currentNalLengthSize = demuxed.nalLengthSize || 4;
           currentContainerInfo = H26xDemux.parseContainerInfo(rawBytes);
           srcNote = " (MP4 demuxed)";
+        } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes)) {
+          var av1 = H26xDemux.parseIvf(rawBytes);
+          if (!av1 || !av1.frames || !av1.frames.length) {
+            setStatus("AV1 parse failed");
+            return;
+          }
+          fileBytes = rawBytes;
+          currentDescription = null;
+          currentNalLengthSize = 4;
+          currentContainerInfo = null;
+          currentAv1Frames = av1.frames;
+          srcNote = " (AV1 IVF)";
+          result = {
+            codec: "av1",
+            data: {
+              nalus: av1.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: -1, jpegSyntax: o.syntax }; }),
+              streamInfo: { nalus: av1.obus.length, slices: av1.frames.length, i: av1.frames.length, p: 0, b: 0, profile: "AV1", level: String(av1.level), picWidth: av1.width, picHeight: av1.height },
+              hdr: {},
+              warnings: []
+            }
+          };
         } else {
           fileBytes = rawBytes;
           currentDescription = null;
