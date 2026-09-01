@@ -713,13 +713,13 @@ timeline.addEventListener("click", function (e) {
 
   function makeAuData(nalIdxs) {
     if (currentCodec === "vp9") {
+      // VP9：chunk 数据是 VP9 frame 本身（无 start code，WebCodecs 规范）
       var vtotal = 0;
-      for (var vk = 0; vk < nalIdxs.length; vk++) vtotal += currentData.nalus[nalIdxs[vk]].length + 4;
+      for (var vk = 0; vk < nalIdxs.length; vk++) vtotal += currentData.nalus[nalIdxs[vk]].length;
       var vdata = new Uint8Array(vtotal);
       var vo = 0;
       for (var vk2 = 0; vk2 < nalIdxs.length; vk2++) {
         var vnal = currentData.nalus[nalIdxs[vk2]];
-        vdata[vo] = 0; vdata[vo + 1] = 0; vdata[vo + 2] = 0; vdata[vo + 3] = 1; vo += 4;
         if (vnal.offset < 0 || vnal.offset + vnal.length > fileBytes.length) { vo += vnal.length; continue; }
         vdata.set(fileBytes.subarray(vnal.offset, vnal.offset + vnal.length), vo);
         vo += vnal.length;
