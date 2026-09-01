@@ -799,6 +799,7 @@ timeline.addEventListener("click", function (e) {
     var probeCfg = { codec: cs };
     if (currentDescription) probeCfg.description = currentDescription;
     VideoDecoder.isConfigSupported(probeCfg).then(function (support) {
+      if (!currentData || !currentCodec) return; // 文件已切换
       if (!support.supported) {
         previewMsg.textContent = "Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : "");
         return;
@@ -1198,10 +1199,12 @@ timeline.addEventListener("click", function (e) {
     if (vvdecLoading) return;
     loadVvdec(function () {
       if (vvdecPlay.active) return;
+      if (!currentData || !timeline._frames) return;
       var M = vvdecModule;
       var params = new M.Params();
       params.threads = 0;
       vvdecPlay.decoder = new M.Decoder(params);
+      try { params.delete(); } catch (e) {}
       vvdecPlay.nalIdx = 0;
       vvdecPlay.cts = 0;
       vvdecPlay.active = true;
@@ -1240,6 +1243,8 @@ timeline.addEventListener("click", function (e) {
             drawVvcFrame(M, h.frame, vvdecPlay.curSlice);
             vvdecPlay.decoder.frame_unref(h.frame);
           }
+          try { au.delete(); } catch (e) {}
+          try { h.delete(); } catch (e) {}
         }
         vvdecPlay.nalIdx = auEnd;
       }, iv);
@@ -1260,6 +1265,7 @@ timeline.addEventListener("click", function (e) {
       var params = new M.Params();
       params.threads = 0;
       var decoder = new M.Decoder(params);
+      try { params.delete(); } catch (e) {}
 
       var cts = 0;
 
@@ -1301,6 +1307,8 @@ timeline.addEventListener("click", function (e) {
             if (lastFramePtr) decoder.frame_unref(lastFramePtr);
             lastFramePtr = h.frame;
           }
+          try { au2.delete(); } catch (e) {}
+          try { h.delete(); } catch (e) {}
         }
 
         // flush 输出剩余帧，取最后一个
@@ -1310,6 +1318,7 @@ timeline.addEventListener("click", function (e) {
           if (lastFramePtr) decoder.frame_unref(lastFramePtr);
           lastFramePtr = fh.frame;
         }
+        try { fh.delete(); } catch (e) {}
 
         if (lastFramePtr) {
           drawVvcFrame(M, lastFramePtr);
@@ -1418,6 +1427,7 @@ timeline.addEventListener("click", function (e) {
     if (!currentAv1Frames || currentAv1Frames.length === 0) return;
     loadDav1d(function () {
       if (av1Play.active) return;
+      if (!currentData || !currentAv1Frames || !timeline._frames) return;
       var M = dav1dModule;
       av1Play.decoder = new M.Decoder(0);
       av1Play.frameIdx = 0;
@@ -1789,6 +1799,9 @@ timeline.addEventListener("click", function (e) {
     play.curFrame = -1;
     play.order = null;
     play.orderPos = -1;
+    play.displayOrder = false;
+    var previewOrderBtn = document.getElementById("previewOrderBtn");
+    if (previewOrderBtn) { previewOrderBtn.textContent = "Decode Order"; }
     if (vvdecPlay.decoder) { try { vvdecPlay.decoder.delete(); } catch (e) {} vvdecPlay.decoder = null; }
     vvdecPlay.nalIdx = 0;
     vvdecPlay.cts = 0;

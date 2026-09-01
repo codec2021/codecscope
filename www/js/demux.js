@@ -52,7 +52,7 @@
     var bitPos = start * 8, bitEnd = end * 8;
     function readBit() { if (bitPos >= bitEnd) return 0; var b = (d[bitPos >> 3] >> (7 - (bitPos & 7))) & 1; bitPos++; return b; }
     function readBits(n) { var v = 0; for (var i = 0; i < n; i++) v = (v << 1) | readBit(); return v; }
-    function uvlc() { var z = 0; while (readBit() === 0) z++; if (z >= 32) return 0; var v = 0; for (var i = 0; i < z; i++) v = (v << 1) | readBit(); return (1 << z) - 1 + v; }
+    function uvlc() { var z = 0; while (readBit() === 0) { z++; if (z >= 32 || bitPos >= bitEnd) break; } if (z >= 32) return 0; var v = 0; for (var i = 0; i < z; i++) v = (v << 1) | readBit(); return (1 << z) - 1 + v; }
 
     var tree = [];
     var hdr = {};
@@ -208,7 +208,7 @@
     var bitPos = start * 8, bitEnd = end * 8;
     function readBit() { if (bitPos >= bitEnd) return 0; var b = (d[bitPos >> 3] >> (7 - (bitPos & 7))) & 1; bitPos++; return b; }
     function readBits(n) { var v = 0; for (var i = 0; i < n; i++) v = (v << 1) | readBit(); return v; }
-    function uvlc() { var z = 0; while (readBit() === 0) z++; if (z >= 32) return 0; var v = 0; for (var i = 0; i < z; i++) v = (v << 1) | readBit(); return (1 << z) - 1 + v; }
+    function uvlc() { var z = 0; while (readBit() === 0) { z++; if (z >= 32 || bitPos >= bitEnd) break; } if (z >= 32) return 0; var v = 0; for (var i = 0; i < z; i++) v = (v << 1) | readBit(); return (1 << z) - 1 + v; }
 
     var tree = [];
     var showExisting = readBit();
@@ -269,7 +269,7 @@
       else size = end - pos;
       var payloadStart = pos;
       var payloadEnd = Math.min(payloadStart + size, end);
-      if (type === 0 || forbidden) { pos = payloadEnd; continue; } // reserved
+      if (type === 0 || forbidden || payloadEnd <= obuStart) { pos = (payloadEnd > obuStart ? payloadEnd : obuStart + 1); continue; } // reserved / 空 OBU 防死循环
 
       var name = AV1_OBU_NAMES[type] || ("OBU_" + type);
       var headerInfo = [
@@ -938,6 +938,8 @@
             var tflags = (d[q + 9] << 16) | (d[q + 10] << 8) | d[q + 11];
             var r = q + 12;
             var sampleCount = readU32(d, r); r += 4;
+            // 防无界循环：sampleCount 不能超过 box 剩余字节数
+            if (sampleCount > (trafEnd - r) || sampleCount > 1000000) { q += tsz; continue; }
             var dataOffset = 0;
             if (tflags & 1) { dataOffset = readU32(d, r); r += 4; }
             if (tflags & 4) r += 4;      // first_sample_flags
