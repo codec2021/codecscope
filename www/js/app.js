@@ -321,20 +321,21 @@
     for (var j = 0; j < nalus.length; j++) {
       var n = nalus[j];
       if (n.sliceType < 0) { n.frameIdx = -1; continue; }
-      slices.push({ index: j, type: n.sliceType, poc: n.slicePoc, firstSlice: n.firstSlice });
+      var poc = (n.slicePoc !== undefined && n.slicePoc !== null) ? n.slicePoc : frames.length;
+      slices.push({ index: j, type: n.sliceType, poc: poc, firstSlice: n.firstSlice });
       var si = slices.length - 1;
       var prev = frames.length > 0 ? frames[frames.length - 1] : null;
       var sameFrame = false;
       if (hasFirstSlice) {
         sameFrame = prev !== null && n.firstSlice === 0;
       } else {
-        sameFrame = prev !== null && prev.poc >= 0 && prev.poc === n.slicePoc && prev.last === si - 1;
+        sameFrame = prev !== null && prev.poc >= 0 && prev.poc === poc && prev.last === si - 1;
       }
       if (sameFrame) {
         prev.last = si;
         prev.slices.push(si);
       } else {
-        frames.push({ first: si, last: si, slices: [si], poc: n.slicePoc, frameNum: frames.length });
+        frames.push({ first: si, last: si, slices: [si], poc: poc, frameNum: frames.length });
       }
       n.frameIdx = frames.length - 1;
     }
