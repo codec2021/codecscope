@@ -132,6 +132,7 @@
     if (currentCodec === "hevc") return "HEVC (High Efficiency Video Coding) / H.265";
     if (currentCodec === "vvc") return "VVC (Versatile Video Coding) / H.266";
     if (currentCodec === "av1") return "AV1 (AOMedia Video 1)";
+    if (currentCodec === "vp9") return "VP9 (Google/On2)";
     if (currentCodec === "jpeg") return "JPEG (Joint Photographic Experts Group)";
     if (currentCodec === "image") return "Image (no bitstream syntax)";
     return "Unknown";
@@ -141,6 +142,7 @@
     if (currentCodec === "hevc") return "HEVC";
     if (currentCodec === "vvc") return "VVC";
     if (currentCodec === "av1") return "AV1";
+    if (currentCodec === "vp9") return "VP9";
     if (currentCodec === "jpeg") return "JPEG";
     if (currentCodec === "image") return "Image";
     return "?";
@@ -710,6 +712,20 @@ timeline.addEventListener("click", function (e) {
   }
 
   function makeAuData(nalIdxs) {
+    if (currentCodec === "vp9") {
+      var vtotal = 0;
+      for (var vk = 0; vk < nalIdxs.length; vk++) vtotal += currentData.nalus[nalIdxs[vk]].length + 4;
+      var vdata = new Uint8Array(vtotal);
+      var vo = 0;
+      for (var vk2 = 0; vk2 < nalIdxs.length; vk2++) {
+        var vnal = currentData.nalus[nalIdxs[vk2]];
+        vdata[vo] = 0; vdata[vo + 1] = 0; vdata[vo + 2] = 0; vdata[vo + 3] = 1; vo += 4;
+        if (vnal.offset < 0 || vnal.offset + vnal.length > fileBytes.length) { vo += vnal.length; continue; }
+        vdata.set(fileBytes.subarray(vnal.offset, vnal.offset + vnal.length), vo);
+        vo += vnal.length;
+      }
+      return vdata;
+    }
     if (currentDescription) {
       // hevc/avc 格式：length-prefixed NAL（description 存在时解码器要求此格式）
       var total = 0;
@@ -996,12 +1012,14 @@ timeline.addEventListener("click", function (e) {
     if (currentCodec === "avc") return type === 1 || type === 5;
     if (currentCodec === "hevc") return type <= 31;
     if (currentCodec === "vvc") return type >= 0 && type <= 12;
+    if (currentCodec === "vp9") return type === 0 || type === 1;
     return false;
   }
   function isKeyNal(type) {
     if (currentCodec === "avc") return type === 5;
     if (currentCodec === "hevc") return type === 16 || type === 17 || type === 18 || type === 19 || type === 20 || type === 21;
     if (currentCodec === "vvc") return type === 7 || type === 8 || type === 9 || type === 10;
+    if (currentCodec === "vp9") return type === 0;
     return false;
   }
 
@@ -1024,6 +1042,11 @@ timeline.addEventListener("click", function (e) {
       return new Uint8Array(out);
     }
     function rev32(v) { var r = 0; for (var i = 0; i < 32; i++) { r = (r << 1) | (v & 1); v >>>= 1; } return r >>> 0; }
+    if (currentCodec === "vp9") {
+      var pp = ("0" + (currentVp9Profile || 0)).slice(-2);
+      var dd = ("0" + (currentVp9BitDepth || 8)).slice(-2);
+      return "vp09." + pp + ".10." + dd;
+    }
     if (currentCodec === "avc") {
       var si = findNalByType(7);
       if (si < 0) return null;
@@ -1328,6 +1351,9 @@ timeline.addEventListener("click", function (e) {
   var dav1dLoading = false;
   var dav1dPending = [];
   var currentAv1Frames = null;
+  var currentVp9Frames = null;
+  var currentVp9Profile = 0;
+  var currentVp9BitDepth = 8;
 
   function loadDav1d(cb) {
     if (dav1dModule) { cb(); return; }
@@ -1769,6 +1795,9 @@ timeline.addEventListener("click", function (e) {
     if (av1Play.decoder) { try { av1Play.decoder.delete(); } catch (e) {} av1Play.decoder = null; }
     av1Play.frameIdx = 0;
     currentAv1Frames = null;
+    currentVp9Frames = null;
+    currentVp9Profile = 0;
+    currentVp9BitDepth = 8;
     heicDecoding = false;
 
     currentData = null;
@@ -1943,26 +1972,42 @@ timeline.addEventListener("click", function (e) {
             srcNote = " (MP4 demuxed)";
           }
         } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes) || H26xDemux.isWebm(rawBytes)) {
-          var av1 = H26xDemux.isWebm(rawBytes) ? H26xDemux.demuxWebm(rawBytes) : H26xDemux.parseIvf(rawBytes);
-          if (!av1 || !av1.frames || !av1.frames.length) {
-            setStatus("AV1 parse failed");
+          var demuxedAv = H26xDemux.isWebm(rawBytes) ? H26xDemux.demuxWebm(rawBytes) : H26xDemux.parseIvf(rawBytes);
+          if (!demuxedAv || !demuxedAv.frames || !demuxedAv.frames.length) {
+            setStatus("AV1/VP9 parse failed");
             return;
           }
           fileBytes = rawBytes;
           currentDescription = null;
           currentNalLengthSize = 4;
           currentContainerInfo = null;
-          currentAv1Frames = av1.frames;
-          srcNote = " (AV1)";
-          result = {
-            codec: "av1",
-            data: {
-              nalus: av1.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: (o.sliceType !== undefined ? o.sliceType : -1), frameType: o.frameType, jpegSyntax: o.syntax }; }),
-              streamInfo: { nalus: av1.obus.length, slices: av1.frames.length, i: av1.frames.length, p: 0, b: 0, profile: "AV1", level: String(av1.level), picWidth: av1.width, picHeight: av1.height },
-              hdr: {},
-              warnings: []
-            }
-          };
+          if (demuxedAv.codec === "vp9") {
+            currentVp9Frames = demuxedAv.frames;
+            currentVp9Profile = demuxedAv.profile || 0;
+            currentVp9BitDepth = demuxedAv.bitDepth || 8;
+            srcNote = " (VP9)";
+            result = {
+              codec: "vp9",
+              data: {
+                nalus: demuxedAv.units.map(function (u) { return { offset: u.offset, length: u.length, type: u.type, typeName: u.typeName, info: u.info, color: u.color, sliceType: (u.sliceType !== undefined ? u.sliceType : -1), frameType: u.frameType, jpegSyntax: u.syntax }; }),
+                streamInfo: { nalus: demuxedAv.units.length, slices: demuxedAv.frames.length, i: 0, p: 0, b: 0, profile: "VP9", level: "-", picWidth: demuxedAv.width, picHeight: demuxedAv.height },
+                hdr: {},
+                warnings: []
+              }
+            };
+          } else {
+            currentAv1Frames = demuxedAv.frames;
+            srcNote = " (AV1)";
+            result = {
+              codec: "av1",
+              data: {
+                nalus: demuxedAv.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: (o.sliceType !== undefined ? o.sliceType : -1), frameType: o.frameType, jpegSyntax: o.syntax }; }),
+                streamInfo: { nalus: demuxedAv.obus.length, slices: demuxedAv.frames.length, i: demuxedAv.frames.length, p: 0, b: 0, profile: "AV1", level: String(demuxedAv.level), picWidth: demuxedAv.width, picHeight: demuxedAv.height },
+                hdr: {},
+                warnings: []
+              }
+            };
+          }
         } else {
           fileBytes = rawBytes;
           currentDescription = null;

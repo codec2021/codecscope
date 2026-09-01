@@ -313,7 +313,8 @@
     var width = d[12] | (d[13] << 8);
     var height = d[14] | (d[15] << 8);
     var fourcc = fourCC(d, 8);
-    if (fourcc !== "AV01" && fourcc !== "AV02") return null;
+    var isVp9 = (fourcc === "VP90");
+    if (fourcc !== "AV01" && fourcc !== "AV02" && fourcc !== "VP90") return null;
 
     var frames = [];
     var obus = [];
@@ -322,10 +323,35 @@
       var sz = (d[pos] | (d[pos + 1] << 8) | (d[pos + 2] << 16) | (d[pos + 3] << 24)) >>> 0;
       pos += 12; // size(4) + timestamp(8)
       if (sz <= 0 || pos + sz > d.length) break;
-      frames.push({ data: d.subarray(pos, pos + sz) });
-      var obuList = parseAv1Obus(d, pos, pos + sz);
-      for (var i = 0; i < obuList.length; i++) obus.push(obuList[i]);
+      frames.push({ data: d.subarray(pos, pos + sz), absOff: pos });
+      if (!isVp9) {
+        var obuList = parseAv1Obus(d, pos, pos + sz);
+        for (var i = 0; i < obuList.length; i++) obus.push(obuList[i]);
+      }
       pos += sz;
+    }
+
+    if (isVp9) {
+      // VP9：解析 frame header
+      var units = [];
+      var vpicW = width, vpicH = height, vprofile = 0, vbitDepth = 8;
+      for (var f = 0; f < frames.length; f++) {
+        var fd = frames[f].data;
+        var absOff = frames[f].absOff;
+        var vhdr = parseVp9FrameHdr(d, absOff, absOff + fd.length);
+        if (vhdr.width && !vpicW) { vpicW = vhdr.width; vpicH = vhdr.height; vprofile = vhdr.profile; vbitDepth = vhdr.bitDepth; }
+        var ft = vhdr.frameType;
+        var ftName = ft === 0 ? "VP9_KEY_FRAME" : (ft === 1 ? "VP9_INTER_FRAME" : "VP9_SHOW_EXISTING");
+        units.push({
+          offset: absOff, length: fd.length, type: ft, typeName: ftName,
+          info: ft === 0 ? "Key frame" : (ft === 1 ? "Inter frame" : "Show existing frame"),
+          color: ft === 0 ? "#CD9B1D" : "#4d94e8",
+          sliceType: ft === 0 ? 2 : (ft === 1 ? 0 : -1),
+          frameType: ft,
+          syntax: { n: ftName, c: vhdr.tree }
+        });
+      }
+      return { codec: "vp9", frames: frames, units: units, width: vpicW, height: vpicH, profile: vprofile, bitDepth: vbitDepth };
     }
 
     // 从 sequence header 提取分辨率
@@ -340,6 +366,73 @@
     }
 
     return { codec: "av1", frames: frames, obus: obus, width: picW, height: picH, profile: profile, level: level };
+  }
+
+  // ---------- VP9 ----------
+  function parseVp9FrameHdr(d, start, end) {
+    var bitPos = start * 8, bitEnd = end * 8;
+    function readBit() { if (bitPos >= bitEnd) return 0; var b = (d[bitPos >> 3] >> (7 - (bitPos & 7))) & 1; bitPos++; return b; }
+    function readBits(n) { var v = 0; for (var i = 0; i < n; i++) v = (v << 1) | readBit(); return v; }
+
+    var tree = [];
+    var frameMarker = readBits(2);
+    tree.push({ n: "frame_marker = " + frameMarker });
+    var profileLow = readBit(), profileHigh = readBit();
+    var profile = (profileHigh << 1) | profileLow;
+    tree.push({ n: "profile = " + profile });
+    var showExisting = readBit();
+    tree.push({ n: "show_existing_frame = " + showExisting });
+    if (showExisting) {
+      tree.push({ n: "frame_to_show_map_idx = " + readBits(3) });
+      return { tree: tree, profile: profile, frameType: -1, width: 0, height: 0 };
+    }
+    var frameType = readBit();
+    tree.push({ n: "frame_type = " + (frameType ? "INTER_FRAME" : "KEY_FRAME") });
+    tree.push({ n: "show_frame = " + readBit() });
+    tree.push({ n: "error_resilient_mode = " + readBit() });
+
+    var width = 0, height = 0, bitDepth = 8;
+    if (frameType === 0) { // KEY_FRAME
+      var sync = readBits(24);
+      tree.push({ n: "frame_sync_code = 0x" + sync.toString(16).toUpperCase() });
+      if (profile >= 2) bitDepth = readBit() ? 12 : 10;
+      tree.push({ n: "bit_depth = " + bitDepth });
+      var colorSpace = readBits(3);
+      tree.push({ n: "color_space = " + colorSpace });
+      var subX = 1, subY = 1;
+      if (colorSpace !== 7) { // CS_RGB
+        tree.push({ n: "color_range = " + readBit() });
+        if (profile === 1 || profile === 3) {
+          subX = readBit(); subY = readBit();
+          tree.push({ n: "reserved_zero = " + readBit() });
+        }
+      } else {
+        tree.push({ n: "color_range = 1" });
+        if (profile === 1 || profile === 3) { subX = 1; subY = 0; }
+      }
+      tree.push({ n: "subsampling_x = " + subX + ", subsampling_y = " + subY });
+      width = readBits(16) + 1;
+      height = readBits(16) + 1;
+      tree.push({ n: "frame_width = " + width });
+      tree.push({ n: "frame_height = " + height });
+      var renderDiff = readBit();
+      tree.push({ n: "render_and_frame_size_different = " + renderDiff });
+      if (renderDiff) {
+        tree.push({ n: "render_width = " + (readBits(16) + 1) });
+        tree.push({ n: "render_height = " + (readBits(16) + 1) });
+      }
+    } else { // INTER_FRAME
+      var intraOnly = readBit();
+      tree.push({ n: "intra_only = " + intraOnly });
+      if (!intraOnly) {
+        tree.push({ n: "reset_frame_context = " + readBits(2) });
+        tree.push({ n: "refresh_frame_flags = " + readBits(8) });
+        tree.push({ n: "..." });
+      } else {
+        tree.push({ n: "reset_frame_context = " + readBits(2) });
+      }
+    }
+    return { tree: tree, profile: profile, frameType: frameType, width: width, height: height, bitDepth: bitDepth };
   }
   function boxSize(d, o) {
     var size = readU32(d, o);
@@ -678,7 +771,7 @@
     var sz = readVint(d, el.end);                  // EBML size
     pos = sz.end + sz.value;
 
-    var width = 0, height = 0, isAv1 = false, codecId = "";
+    var width = 0, height = 0, isAv1 = false, isVp9 = false, codecId = "";
     var frames = [], obus = [];
 
     // 读 Segment
@@ -719,19 +812,24 @@
                   var ve = readVint(d, vp); var vid = ve.value; vp = ve.end;
                   var vsz = readVint(d, vp); vp = vsz.end;
                   if (vsz.value < 0) break;
-                  if (vid === 0x30) width = (d[vp] << 8) | d[vp + 1];
-                  else if (vid === 0x3A) height = (d[vp] << 8) | d[vp + 1];
+                  if (vid === 0x30 || vid === 0x3A) { // PixelWidth / PixelHeight (可变长度 uint)
+                    var uv = 0;
+                    for (var ui = 0; ui < vsz.value && ui < 4; ui++) uv = uv * 256 + d[vp + ui];
+                    if (vid === 0x30) width = uv;
+                    else height = uv;
+                  }
                   vp += vsz.value;
                 }
               }
               cp += csz.value;
             }
             if (codecId === "V_AV1") isAv1 = true;
+            else if (codecId === "V_VP9") isVp9 = true;
           }
           tp = tEnd;
         }
       }
-      else if (id === 0xF43B675 && isAv1) { // Cluster
+      else if (id === 0xF43B675 && (isAv1 || isVp9)) { // Cluster
         var cp = elemStart;
         while (cp + 2 <= dataEnd) {
           var ce = readVint(d, cp); var cid = ce.value;
@@ -753,7 +851,29 @@
       pos = dataEnd;
     }
 
-    if (!isAv1 || frames.length === 0) return null;
+    if (!(isAv1 || isVp9) || frames.length === 0) return null;
+
+    if (isVp9) {
+      var units = [];
+      var vpicW = width, vpicH = height, vprofile = 0, vbitDepth = 8;
+      for (var f = 0; f < frames.length; f++) {
+        var fd = frames[f].data;
+        var absOff = frames[f].absOff;
+        var vhdr = parseVp9FrameHdr(d, absOff, absOff + fd.length);
+        if (vhdr.width && !vpicW) { vpicW = vhdr.width; vpicH = vhdr.height; vprofile = vhdr.profile; vbitDepth = vhdr.bitDepth; }
+        var ft = vhdr.frameType;
+        var ftName = ft === 0 ? "VP9_KEY_FRAME" : (ft === 1 ? "VP9_INTER_FRAME" : "VP9_SHOW_EXISTING");
+        units.push({
+          offset: absOff, length: fd.length, type: ft, typeName: ftName,
+          info: ft === 0 ? "Key frame" : (ft === 1 ? "Inter frame" : "Show existing frame"),
+          color: ft === 0 ? "#CD9B1D" : "#4d94e8",
+          sliceType: ft === 0 ? 2 : (ft === 1 ? 0 : -1),
+          frameType: ft,
+          syntax: { n: ftName, c: vhdr.tree }
+        });
+      }
+      return { codec: "vp9", frames: frames, units: units, width: vpicW, height: vpicH, profile: vprofile, bitDepth: vbitDepth };
+    }
 
     for (var f = 0; f < frames.length; f++) {
       var fd = frames[f].data;
