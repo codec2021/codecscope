@@ -1890,7 +1890,7 @@ timeline.addEventListener("click", function (e) {
           result = {
             codec: "av1",
             data: {
-              nalus: avif.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: -1, jpegSyntax: o.syntax }; }),
+              nalus: avif.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: (o.sliceType !== undefined ? o.sliceType : -1), frameType: o.frameType, jpegSyntax: o.syntax }; }),
               streamInfo: { nalus: avif.obus.length, slices: avif.frames.length, i: avif.frames.length, p: 0, b: 0, profile: "AV1", level: String(avif.level), picWidth: avif.width, picHeight: avif.height },
               hdr: {},
               warnings: []
@@ -1923,7 +1923,7 @@ timeline.addEventListener("click", function (e) {
             result = {
               codec: "av1",
               data: {
-                nalus: av1mp4.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: -1, jpegSyntax: o.syntax }; }),
+                nalus: av1mp4.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: (o.sliceType !== undefined ? o.sliceType : -1), frameType: o.frameType, jpegSyntax: o.syntax }; }),
                 streamInfo: { nalus: av1mp4.obus.length, slices: av1mp4.frames.length, i: av1mp4.frames.length, p: 0, b: 0, profile: "AV1", level: String(av1mp4.level), picWidth: av1mp4.width, picHeight: av1mp4.height },
                 hdr: {},
                 warnings: []
@@ -1956,7 +1956,7 @@ timeline.addEventListener("click", function (e) {
           result = {
             codec: "av1",
             data: {
-              nalus: av1.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: -1, jpegSyntax: o.syntax }; }),
+              nalus: av1.obus.map(function (o) { return { offset: o.offset, length: o.length, type: o.type, typeName: o.typeName, info: o.info, color: o.color, sliceType: (o.sliceType !== undefined ? o.sliceType : -1), frameType: o.frameType, jpegSyntax: o.syntax }; }),
               streamInfo: { nalus: av1.obus.length, slices: av1.frames.length, i: av1.frames.length, p: 0, b: 0, profile: "AV1", level: String(av1.level), picWidth: av1.width, picHeight: av1.height },
               hdr: {},
               warnings: []

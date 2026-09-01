@@ -215,7 +215,7 @@
     tree.push({ n: "show_existing_frame = " + showExisting });
     if (showExisting) {
       tree.push({ n: "frame_to_show_map_idx = " + readBits(3) });
-      return tree;
+      return { tree: tree, frameType: -1 };
     }
     var frameType = readBits(2);
     tree.push({ n: "frame_type = " + frameType + " (" + (AV1_FRAME_TYPE[frameType] || "?") + ")" });
@@ -224,7 +224,7 @@
     tree.push({ n: "showable_frame = " + showable });
     if (frameType === 3 /* SWITCH */) {
       tree.push({ n: "error_resilient_mode = " + readBit() });
-      return tree;
+      return { tree: tree, frameType: frameType };
     }
     var errorResilient = frameType === 0 /* KEY */ ? 1 : readBit();
     tree.push({ n: "error_resilient_mode = " + errorResilient });
@@ -248,7 +248,7 @@
     }
     // 剩余字段太复杂，停止解析（用省略号表示）
     tree.push({ n: "..." });
-    return tree;
+    return { tree: tree, frameType: frameType };
   }
 
   function parseAv1Obus(d, start, end) {
@@ -280,20 +280,28 @@
         { n: "obu_size = " + size }
       ];
       var syntax = { n: name, c: headerInfo };
+      var sliceType = -1;
+      var frameType = -1;
       if (type === 1) {
         var sh = parseAv1SeqHdr(d, payloadStart, payloadEnd);
         seqHdr = sh.hdr;
         syntax.c = headerInfo.concat([{ n: "payload", c: sh.tree }]);
       } else if (type === 3 || type === 7) { // frame header / redundant frame header
         var fh = parseAv1FrameHdr(d, payloadStart, payloadEnd, seqHdr);
-        syntax.c = headerInfo.concat([{ n: "payload", c: fh }]);
+        frameType = fh.frameType;
+        syntax.c = headerInfo.concat([{ n: "payload", c: fh.tree }]);
       } else if (type === 6) { // frame (含 frame header + tile group)
         var fh6 = parseAv1FrameHdr(d, payloadStart, payloadEnd, seqHdr);
-        syntax.c = headerInfo.concat([{ n: "payload", c: fh6.concat([{ n: "tile_group (coded tile data, " + size + " bytes)" }]) }]);
+        frameType = fh6.frameType;
+        syntax.c = headerInfo.concat([{ n: "payload", c: fh6.tree.concat([{ n: "tile_group (coded tile data, " + size + " bytes)" }]) }]);
       } else if (type === 4) { // tile group
         syntax.c = headerInfo.concat([{ n: "payload (" + size + " bytes of coded tile data)" }]);
       }
-      obus.push({ offset: obuStart, length: payloadEnd - obuStart, type: type, typeName: name, info: name, color: AV1_OBU_COLORS[type] || "#4d94e8", syntax: syntax, payloadStart: payloadStart, payloadEnd: payloadEnd });
+      // 映射帧类型到 sliceType（用于时间轴）：KEY/INTRA_ONLY/SWITCH=I，INTER=P
+      if (frameType >= 0 && (type === 6 || type === 3 || type === 7)) {
+        sliceType = (frameType === 1) ? 0 : 2; // INTER=P(0)，其余=I(2)
+      }
+      obus.push({ offset: obuStart, length: payloadEnd - obuStart, type: type, typeName: name, info: name, color: AV1_OBU_COLORS[type] || "#4d94e8", syntax: syntax, payloadStart: payloadStart, payloadEnd: payloadEnd, sliceType: sliceType, frameType: frameType });
       pos = payloadEnd;
     }
     return obus;
