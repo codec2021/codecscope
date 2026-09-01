@@ -1,6 +1,6 @@
 # CodecScope
 
-一个在浏览器中运行的 **H.264 / H.265 / H.266 / AV1 视频码流分析工具**，同时支持 **HEIC / AVIF / JPEG / PNG 图片分析**（源自 [HEVCESBrowser](https://github.com/virinext/hevcesbrowser) 的 Web 版）。
+一个在浏览器中运行的 **H.264 / H.265 / H.266 / AV1 / VP9 视频码流分析工具**，同时支持 **HEIC / AVIF / JPEG / PNG 图片分析**（源自 [HEVCESBrowser](https://github.com/virinext/hevcesbrowser) 的 Web 版）。
 
 复用原项目 `hevcparser` 的 C++ 解析核心，并为 H.264 (AVC)、H.266 (VVC) 分别实现了新解析器，通过 [Emscripten](https://emscripten.org/) 编译为 WebAssembly，前端使用原生 HTML/CSS/JavaScript，可直接用 **GitHub Pages** 免费静态托管，**无需安装、无需后端**，浏览器打开即用。
 
@@ -14,6 +14,7 @@
 | H.265 (HEVC) | HEVC/H.265 | `hevcparser`（原项目） | WebCodecs |
 | H.266 (VVC) | VVC/H.266 | `vvcparser`（新实现） | vvdec (WASM) |
 | AV1 | AOMedia Video 1 | OBU 解析（JS） | dav1d (WASM) |
+| VP9 | Google/On2 VP9 | Frame header 解析（JS） | WebCodecs |
 | HEIC/HEIF | iPhone 照片 | `parseHeic`（JS） | libheif (WASM) |
 | AVIF | AV1 图片 | `parseAvif`（JS） | dav1d (WASM) |
 | JPEG/PNG/GIF/WebP/BMP | 通用图片 | JPEG 标记段解析（JS） | 浏览器原生 |
