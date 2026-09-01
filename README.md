@@ -1,44 +1,49 @@
 # CodecScope
 
-一个在浏览器中运行的 **H.264 / H.265 / H.266 视频码流分析 + HEIC 图片分析工具**（源自 [HEVCESBrowser](https://github.com/virinext/hevcesbrowser) 的 Web 版）。
+一个在浏览器中运行的 **H.264 / H.265 / H.266 / AV1 视频码流分析工具**，同时支持 **HEIC / AVIF / JPEG / PNG 图片分析**（源自 [HEVCESBrowser](https://github.com/virinext/hevcesbrowser) 的 Web 版）。
 
-复用原项目 `hevcparser` 的 C++ 解析核心，并为 H.264 (AVC) 与 H.266 (VVC) 分别实现了新解析器，通过 [Emscripten](https://emscripten.org/) 编译为 WebAssembly，前端使用原生 HTML/CSS/JavaScript，可直接用 **GitHub Pages** 免费静态托管，**无需安装、无需后端**，浏览器打开即用。
+复用原项目 `hevcparser` 的 C++ 解析核心，并为 H.264 (AVC)、H.266 (VVC) 分别实现了新解析器，通过 [Emscripten](https://emscripten.org/) 编译为 WebAssembly，前端使用原生 HTML/CSS/JavaScript，可直接用 **GitHub Pages** 免费静态托管，**无需安装、无需后端**，浏览器打开即用。
 
 > 在线体验：https://codec2021.github.io/codecscope/
 
 ## 支持的标准
 
-| 标准 | 说明 | 解析器 |
-|------|------|--------|
-| H.264 (AVC) | AVC/H.264 | `h264parser`（新实现） |
-| H.265 (HEVC) | HEVC/H.265 | `hevcparser`（原项目） |
-| H.266 (VVC) | VVC/H.266 | `vvcparser`（新实现） |
-| HEIC/HEIF | 静态图片 | libheif (Emscripten WASM) |
+| 标准 | 说明 | 语法解析 | 画面解码 |
+|------|------|---------|---------|
+| H.264 (AVC) | AVC/H.264 | `h264parser`（新实现） | WebCodecs |
+| H.265 (HEVC) | HEVC/H.265 | `hevcparser`（原项目） | WebCodecs |
+| H.266 (VVC) | VVC/H.266 | `vvcparser`（新实现） | vvdec (WASM) |
+| AV1 | AOMedia Video 1 | OBU 解析（JS） | dav1d (WASM) |
+| HEIC/HEIF | iPhone 照片 | `parseHeic`（JS） | libheif (WASM) |
+| AVIF | AV1 图片 | `parseAvif`（JS） | dav1d (WASM) |
+| JPEG/PNG/GIF/WebP/BMP | 通用图片 | JPEG 标记段解析（JS） | 浏览器原生 |
 
 码流类型会**自动识别**，无需手动选择。
 
 ## 功能
 
-- **NAL 单元列表**（虚拟滚动，可流畅处理数万 NAL 的大文件）：偏移、长度、类型、所属帧号和可读信息
-- **语法元素树**：点击任一 NAL，展示其完整语法元素树（SPS/PPS/VPS/Slice Header 等逐位解析）
-- **Hex 视图**：查看选中 NAL 的十六进制 + ASCII 内容
-- **帧结构时间轴**：I/P/B slice 类型的可视化时间轴（GOP 结构），支持缩放、逐帧步进、帧号/POC 标记与帧间物理分隔
-- **码流统计**：NALUs / Slices 数量、I/P/B 分布、Profile、Level、Tier、分辨率、真实帧率（FPS）
-- **视频播放**：基于 WebCodecs 的帧级预览与播放，支持**解码顺序 / 显示顺序**切换（正确处理 B 帧重排），单帧步进
-- **容器解封装**：直接拖入 MP4/MOV 文件自动解封装（hvcC/avcC 提取 description 供解码）
+- **NAL / OBU 单元列表**（虚拟滚动，可流畅处理数万单元的大文件）：偏移、长度、类型、所属帧号和可读信息
+- **语法元素树**：点击任一 NAL/OBU，展示其完整语法元素树（SPS/PPS/VPS/Slice Header、AV1 sequence/frame header、JPEG 标记段等逐位解析）
+- **Hex 视图**：查看选中单元的十六进制 + ASCII 内容
+- **帧结构时间轴**：I/P/B slice 类型的可视化时间轴（GOP 结构），支持缩放、逐帧步进、帧号/POC 标记、播放进度高亮与自动滚动
+- **码流统计**：单元数量、I/P/B 分布、Profile、Level、Tier、分辨率、真实帧率（FPS）
+- **视频播放**：帧级预览与连续播放，支持**解码顺序 / 显示顺序**切换（正确处理 B 帧重排）、单帧步进、播放进度高亮
+- **容器解封装**：直接拖入 MP4/MOV（AVC/HEVC/VVC/AV1）、WebM、IVF 文件自动解封装
 - **MediaInfo 面板**：树状展示完整容器信息（General / Video / Audio / Other 轨道）——格式、时长、码率、编码日期、音频采样率/声道/位深、流大小等，类似 MediaInfo
-- **HEIC/HEIF 图片支持**：解析 HEIC 静态图（ispe 分辨率 + hvcC 配置 + iloc/iref 图像数据），支持 **libheif WASM 解码预览**，显示 IDR 帧与语法树
+- **HEIC/HEIF 图片**：解析 ispe 分辨率 + hvcC 配置 + iloc/iref 图像数据，支持 **libheif WASM 解码预览**，显示 IDR 帧与语法树
+- **AVIF 图片**：解析 ispe + av1C + iloc，支持 **dav1d WASM 解码预览**，显示 OBU 语法树
+- **JPEG 图片**：标记段列表 + 语法树（SOF/DQT/DHT/SOS + EXIF 元数据）
 - **HDR 信息**：色彩原色、传输特性、矩阵系数、CLL、Mastering Display 等（HEVC）
 - **警告面板**：数值越界、引用结构缺失、Profile 一致性检查，支持按类型过滤
-- **三视图联动**：NAL 列表 / 时间轴 / 预览画面点击互相同步高亮跳转
+- **三视图联动**：单元列表 / 时间轴 / 预览画面点击互相同步高亮跳转
 - **可拖拽布局**：各面板大小可拖动调整
 - **移动端适配**：窄屏自动切换为底部导航的堆叠布局
 
 ## 使用
 
-- 拖拽或选择 **裸基本流**（`.h264 / .h265 / .h266`）、**MP4/MOV** 容器文件，或 **HEIC/HEIF** 图片
-- 点击 NAL 列表任意行查看语法树与 Hex；点击时间轴帧查看预览画面
-- 预览 Tab 中可播放（按真实帧率），并可在「Decode Order / Display Order」间切换
+- 拖拽或选择 **裸基本流**（`.h264 / .h265 / .h266`）、**MP4/MOV**、**WebM/IVF** 容器文件，或 **HEIC / AVIF / JPEG / PNG** 图片
+- 点击单元列表任意行查看语法树与 Hex；点击时间轴帧查看预览画面
+- 预览 Tab 中可播放，并可在「Decode Order / Display Order」间切换
 - MediaInfo Tab 查看容器/码流的完整元信息
 - 分隔条可拖动调整各面板大小
 
@@ -75,7 +80,11 @@ https://codec2021.github.io/codecscope/
 │   ├── css/style.css
 │   └── js/
 │       ├── app.js          # 主逻辑（渲染 / 播放 / 布局）
-│       └── demux.js        # MP4 解封装模块
+│       ├── demux.js        # MP4/MOV/WebM/IVF 解封装 + HEIC/AVIF 解析
+│       ├── jpeg.js         # JPEG 标记段 + EXIF 解析
+│       ├── libheif.min.js  # HEIC 解码库（libheif WASM）
+│       ├── vvdecapp.js/.wasm  # VVC 解码库（vvdec WASM）
+│       └── dav1dapp.js/.wasm # AV1 解码库（dav1d WASM）
 ├── build.sh                # WASM 构建脚本
 ├── Makefile                # 本地原生编译（测试）/ wasm 构建
 ├── .github/workflows/deploy.yml  # 自动构建 + 部署 GitHub Pages
