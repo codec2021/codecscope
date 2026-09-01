@@ -2015,6 +2015,7 @@ timeline.addEventListener("click", function (e) {
 
         if (currentData.nalus.length > 0) selectNal(0, false);
         if (isImage) { showTab("preview"); previewFrame(0); }
+        else if (currentData.nalus.length > 0) { showTab("preview"); presetPreviewCanvas(); previewFrame(0); }
 
         setStatus("Parsed: " + currentCodec.toUpperCase() + ", " + currentData.nalus.length + " NAL units" + srcNote + ", " + (t1 - t0).toFixed(0) + " ms");
       } catch (err) {
