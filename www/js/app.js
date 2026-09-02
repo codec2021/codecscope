@@ -117,7 +117,9 @@
     stat("I", si.i + (si.iPct !== undefined ? " (" + si.iPct + "%)" : ""));
     stat("P", si.p + (si.pPct !== undefined ? " (" + si.pPct + "%)" : ""));
     stat("B", si.b + (si.bPct !== undefined ? " (" + si.bPct + "%)" : ""));
-    if (si.picWidth) stat("Resolution", si.picWidth + " x " + si.picHeight);
+    var resW = si.picWidth || (currentData && currentData.hdr && currentData.hdr.picWidth);
+    var resH = si.picHeight || (currentData && currentData.hdr && currentData.hdr.picHeight);
+    if (resW) stat("Resolution", resW + " x " + resH);
     stat("Profile", si.profile);
     stat("Level", si.level);
     if (si.tier) stat("Tier", si.tier);
