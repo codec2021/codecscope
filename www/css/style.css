@@ -222,6 +222,11 @@ td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
 .hex-byte { color: #e0e0e0; }
 .hex-ascii { color: #7ec8ff; }
 
+.bitrate-view { flex: 1; overflow: auto; padding: 8px 12px; }
+.bitrate-stats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; font-size: 12px; color: var(--text-dim); }
+.bitrate-stats b { color: var(--text); font-weight: 600; }
+.bitrate-chart { display: block; width: 100%; }
+
 .statusbar {
   flex: 0 0 auto; padding: 4px 16px; background: var(--header-bg);
   border-top: 1px solid var(--border); color: var(--text-dim); font-size: 12px;

@@ -33,6 +33,7 @@
   var syntaxTitle = document.getElementById("syntaxTitle");
   var mediaInfoView = document.getElementById("mediaInfoView");
   var hexView = document.getElementById("hexView");
+  var bitrateView = document.getElementById("bitrateView");
   var hdrInfo = document.getElementById("hdrInfo");
   var warningBody = document.getElementById("warningBody");
   var warningCount = document.getElementById("warningCount");
@@ -464,6 +465,68 @@
              '<span class="hex-ascii">|' + lineAscii + "|</span>\n";
     }
     hexView.innerHTML = out;
+  }
+
+  // 码率视图：每帧字节大小柱状图 + 统计
+  function renderBitrate() {
+    if (!currentData || !timeline._slices) { bitrateView.innerHTML = ""; return; }
+    var frames = timeline._frames || [];
+    if (frames.length === 0) { bitrateView.innerHTML = ""; return; }
+
+    var sizes = new Array(frames.length);
+    var total = 0, maxSize = 0, maxIdx = 0;
+    for (var f = 0; f < frames.length; f++) {
+      var fr = frames[f];
+      var sz = 0;
+      for (var k = 0; k < fr.slices.length; k++) {
+        var nal = currentData.nalus[timeline._slices[fr.slices[k]].index];
+        if (nal) sz += nal.length;
+      }
+      sizes[f] = sz;
+      total += sz;
+      if (sz > maxSize) { maxSize = sz; maxIdx = f; }
+    }
+
+    var fps = 0;
+    if (currentData.streamInfo) fps = parseFloat(currentData.streamInfo.fps) || 0;
+    var avgBytes = total / frames.length;
+    var bitrate = fps > 0 ? total * 8 * fps : 0;
+
+    var html = '<div class="bitrate-stats">';
+    html += '<span>Frames: <b>' + frames.length + '</b></span>';
+    html += '<span>Total: <b>' + fmtSize(total) + '</b></span>';
+    html += '<span>Avg frame: <b>' + fmtSize(Math.round(avgBytes)) + '</b></span>';
+    if (bitrate > 0) html += '<span>Avg bitrate: <b>' + fmtBitrate(bitrate) + '</b></span>';
+    html += '<span>Peak: <b>frame #' + maxIdx + ' (' + fmtSize(maxSize) + ')</b></span>';
+    html += '</div>';
+
+    var canvas = document.createElement("canvas");
+    canvas.className = "bitrate-chart";
+    var w = Math.max(300, bitrateView.clientWidth - 24);
+    var h = 180;
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(w * dpr));
+    canvas.height = Math.max(1, Math.round(h * dpr));
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    var ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    var barW = w / frames.length;
+    var chartH = h - 14;
+    for (var i = 0; i < frames.length; i++) {
+      var bh = maxSize > 0 ? Math.max(1, (sizes[i] / maxSize) * chartH) : 0;
+      var x = i * barW;
+      ctx.fillStyle = (i === maxIdx) ? "#e05555" : "#4d94e8";
+      ctx.fillRect(x, h - bh - 8, Math.max(0.5, barW - 0.5), bh);
+    }
+    ctx.fillStyle = "#888";
+    ctx.font = "9px monospace";
+    ctx.fillText("0", 2, h - 1);
+    ctx.fillText(fmtSize(maxSize), Math.max(0, w - 60), 10);
+
+    bitrateView.innerHTML = html;
+    bitrateView.appendChild(canvas);
   }
 
   // 帧时间轴（Slice 可视化，标记帧号 / POC）
@@ -1738,18 +1801,22 @@ timeline.addEventListener("click", function (e) {
   var tabSyntax = document.getElementById("tabSyntax");
   var tabPreview = document.getElementById("tabPreview");
   var tabHex = document.getElementById("tabHex");
+  var tabBitrate = document.getElementById("tabBitrate");
   var tabMediaInfo = document.getElementById("tabMediaInfo");
 
   function showTab(which) {
     tabSyntax.classList.toggle("active", which === "syntax");
     tabPreview.classList.toggle("active", which === "preview");
     tabHex.classList.toggle("active", which === "hex");
+    tabBitrate.classList.toggle("active", which === "bitrate");
     tabMediaInfo.classList.toggle("active", which === "mediainfo");
     syntaxTree.classList.toggle("hidden", which !== "syntax");
     previewView.classList.toggle("hidden", which !== "preview");
     hexView.classList.toggle("hidden", which !== "hex");
+    bitrateView.classList.toggle("hidden", which !== "bitrate");
     mediaInfoView.classList.toggle("hidden", which !== "mediainfo");
     if (which === "preview" && currentData && !previewCanvasTouched) presetPreviewCanvas();
+    if (which === "bitrate" && currentData) renderBitrate();
     if (which === "mediainfo" && currentData && !mediaInfoView.dataset.rendered) {
       renderMediaInfo();
       mediaInfoView.dataset.rendered = "1";
@@ -1759,6 +1826,7 @@ timeline.addEventListener("click", function (e) {
   tabSyntax.addEventListener("click", function () { showTab("syntax"); });
   tabPreview.addEventListener("click", function () { showTab("preview"); });
   tabHex.addEventListener("click", function () { showTab("hex"); });
+  tabBitrate.addEventListener("click", function () { showTab("bitrate"); });
   tabMediaInfo.addEventListener("click", function () { showTab("mediainfo"); });
 
   previewPlayBtn.addEventListener("click", function () { startPlayback(); });
@@ -1850,6 +1918,7 @@ timeline.addEventListener("click", function (e) {
     syntaxTitle.textContent = "";
     mediaInfoView.innerHTML = "";
     mediaInfoView.dataset.rendered = "";
+    bitrateView.innerHTML = "";
     hdrInfo.innerHTML = "";
     warningBody.innerHTML = "";
     warningCount.textContent = "";
