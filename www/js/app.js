@@ -48,6 +48,7 @@
 
   var ROW_HEIGHT = 22;
   var timelineZoom = 1.15;  // 时间轴缩放倍数
+  var setMobileView = null; // 移动端视图切换函数
   var selectedSlice = -1; // 时间轴上选中的帧
   var previewCanvasTouched = false; // 预览 canvas 是否已被帧画面覆盖
 
@@ -2073,8 +2074,8 @@ timeline.addEventListener("click", function (e) {
         mediaInfoView.dataset.rendered = "";
 
         if (currentData.nalus.length > 0) selectNal(0, false);
-        if (isImage) { showTab("preview"); previewFrame(0); }
-        else if (currentData.nalus.length > 0) { showTab("preview"); presetPreviewCanvas(); previewFrame(0); }
+        if (isImage) { showTab("preview"); if (setMobileView) setMobileView("syntax"); previewFrame(0); }
+        else if (currentData.nalus.length > 0) { showTab("preview"); if (setMobileView) setMobileView("syntax"); presetPreviewCanvas(); previewFrame(0); }
 
         setStatus("Parsed: " + currentCodec.toUpperCase() + ", " + currentData.nalus.length + " NAL units" + srcNote + ", " + (t1 - t0).toFixed(0) + " ms");
       } catch (err) {
@@ -2204,7 +2205,7 @@ timeline.addEventListener("click", function (e) {
     makeSplitterCol("splitMainCol", mainArea);
     makeSplitterCol("splitBottomCol", bottomPanels);
     makeSplitterRow("splitMainRow", bottomPanels);
-    initMobileNav();
+    setMobileView = initMobileNav();
     if (typeof createHevcModule !== "function") {
       setStatus("Error: WASM module (hevc.js) not found");
       return;
