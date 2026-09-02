@@ -537,6 +537,17 @@
     var frames = cf.frames;
     timeline._frames = frames;
 
+    // 预计算关键帧索引（用于 findKeyFrame 二分查找，避免 seek 时线性扫描）
+    var keyFrames = [];
+    for (var kfi = 0; kfi < frames.length; kfi++) {
+      var ksl = frames[kfi].slices;
+      for (var kk = 0; kk < ksl.length; kk++) {
+        var knal = currentData.nalus[timeline._slices[ksl[kk]].index];
+        if (knal && isKeyNal(knal.type)) { keyFrames.push(kfi); break; }
+      }
+    }
+    timeline._keyFrames = keyFrames;
+
     var dpr = window.devicePixelRatio || 1;
     var labelH = TL_LABEL_H;
     var barH = TL_BAR_H;
@@ -740,6 +751,17 @@ timeline.addEventListener("click", function (e) {
   function findKeyFrame(frameIndex) {
     var frames = timeline._frames;
     if (!frames) return -1;
+    var kf = timeline._keyFrames;
+    if (kf && kf.length > 0) {
+      // 二分查找 <= frameIndex 的最大关键帧
+      var lo = 0, hi = kf.length - 1, ans = -1;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (kf[mid] <= frameIndex) { ans = kf[mid]; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+      return ans;
+    }
     for (var f = frameIndex; f >= 0; f--) {
       var sl = frames[f].slices;
       for (var k = 0; k < sl.length; k++) {
@@ -859,18 +881,15 @@ timeline.addEventListener("click", function (e) {
     }
   }
 
+  var cachedCodecSupport = null; // 缓存 isConfigSupported 结果，避免每次 seek 都异步等待
+
   function initPlayDecoder(done) {
     var cs = codecString();
     if (!cs) { previewMsg.textContent = "Unable to determine codec string"; return; }
-    var probeCfg = { codec: cs };
-    if (currentDescription) probeCfg.description = currentDescription;
-    VideoDecoder.isConfigSupported(probeCfg).then(function (support) {
-      if (!currentData || !currentCodec) return; // 文件已切换
-      if (!support.supported) {
-        previewMsg.textContent = "Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : "");
-        return;
-      }
-      if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
+    var conf = { codec: cs, optimizeForLatency: true };
+    if (currentDescription) conf.description = currentDescription;
+
+    function createDecoder() {
       for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
       play.frames = {};
       play.feedFrame = -1;
@@ -878,18 +897,43 @@ timeline.addEventListener("click", function (e) {
       var types = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
       for (var i = 0; i < currentData.nalus.length; i++)
         if (types.indexOf(currentData.nalus[i].type) >= 0) play.params.push(i);
-      play.decoder = new VideoDecoder({
-        output: function (frame) { play.frames[frame.timestamp] = frame; },
-        error: function (err) {
-          if (play.decoder !== this) return;
-          previewMsg.textContent = "Decode error: " + err.message;
-          stopPlayback();
-        }
-      });
-      var conf = { codec: cs, optimizeForLatency: true };
-      if (currentDescription) conf.description = currentDescription;
-      play.decoder.configure(conf);
+
+      if (play.decoder && play.decoder.state === "configured") {
+        try { play.decoder.reset(); } catch (e) { try { play.decoder.close(); } catch (e2) {} play.decoder = null; }
+      }
+      if (!play.decoder) {
+        play.decoder = new VideoDecoder({
+          output: function (frame) { play.frames[frame.timestamp] = frame; },
+          error: function (err) {
+            if (play.decoder !== this) return;
+            previewMsg.textContent = "Decode error: " + err.message;
+            stopPlayback();
+          }
+        });
+        play.decoder.configure(conf);
+      }
       done();
+    }
+
+    if (cachedCodecSupport && cachedCodecSupport.cs === cs) {
+      if (!cachedCodecSupport.supported) {
+        previewMsg.textContent = "Browser does not support decoding " + cs;
+        return;
+      }
+      createDecoder();
+      return;
+    }
+
+    var probeCfg = { codec: cs };
+    if (currentDescription) probeCfg.description = currentDescription;
+    VideoDecoder.isConfigSupported(probeCfg).then(function (support) {
+      cachedCodecSupport = { cs: cs, supported: support.supported };
+      if (!currentData || !currentCodec) return; // 文件已切换
+      if (!support.supported) {
+        previewMsg.textContent = "Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : "");
+        return;
+      }
+      createDecoder();
     }).catch(function (err) {
       previewMsg.textContent = "Config error: " + err.message;
     });
@@ -1901,6 +1945,7 @@ timeline.addEventListener("click", function (e) {
     timeline._frames = null;
     timeline._slices = null;
     timeline._nalToSlice = null;
+    timeline._keyFrames = null;
     timeline._xs = null;
     timeline._base = null;
     timeline._baseBarW = null;
