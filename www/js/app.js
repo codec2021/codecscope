@@ -575,8 +575,8 @@
       ' <span style="color:var(--text-dim)"> | Frame# / POC | Click a frame to preview | Zoom</span>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>' +
-      ' <button class="zoom-btn" title="Prev frame" onclick="window.__tlStep(-1)">⏮</button>' +
-      ' <button class="zoom-btn" title="Next frame" onclick="window.__tlStep(1)">⏭</button>';
+      ' <button class="zoom-btn" title="Prev frame" onclick="window.__tlStep(-1)">|◀</button>' +
+      ' <button class="zoom-btn" title="Next frame" onclick="window.__tlStep(1)">▶|</button>';
   }
 
   var zoomRaf = 0;
