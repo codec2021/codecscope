@@ -542,7 +542,7 @@
     for (var kfi = 0; kfi < frames.length; kfi++) {
       var ksl = frames[kfi].slices;
       for (var kk = 0; kk < ksl.length; kk++) {
-        var knal = currentData.nalus[timeline._slices[ksl[kk]].index];
+        var knal = currentData.nalus[slices[ksl[kk]].index];
         if (knal && isKeyNal(knal.type)) { keyFrames.push(kfi); break; }
       }
     }
