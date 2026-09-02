@@ -883,23 +883,30 @@ timeline.addEventListener("click", function (e) {
 
   var cachedCodecSupport = null; // 缓存 isConfigSupported 结果，避免每次 seek 都异步等待
 
-  function initPlayDecoder(done) {
+  function initPlayDecoder(done, needReset) {
     var cs = codecString();
     if (!cs) { previewMsg.textContent = "Unable to determine codec string"; return; }
     var conf = { codec: cs, optimizeForLatency: true };
     if (currentDescription) conf.description = currentDescription;
 
     function createDecoder() {
-      for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
-      play.frames = {};
-      play.feedFrame = -1;
-      play.params = [];
-      var types = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
-      for (var i = 0; i < currentData.nalus.length; i++)
-        if (types.indexOf(currentData.nalus[i].type) >= 0) play.params.push(i);
+      if (needReset || !play.decoder) {
+        // 需要重新从关键帧解码：清空已解码帧
+        if (needReset) {
+          for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
+          play.frames = {};
+          play.feedFrame = -1;
+        }
+        play.params = [];
+        var types = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
+        for (var i = 0; i < currentData.nalus.length; i++)
+          if (types.indexOf(currentData.nalus[i].type) >= 0) play.params.push(i);
+      }
 
       if (play.decoder && play.decoder.state === "configured") {
-        try { play.decoder.reset(); } catch (e) { try { play.decoder.close(); } catch (e2) {} play.decoder = null; }
+        if (needReset) {
+          try { play.decoder.reset(); } catch (e) { try { play.decoder.close(); } catch (e2) {} play.decoder = null; }
+        }
       }
       if (!play.decoder) {
         play.decoder = new VideoDecoder({
@@ -1085,8 +1092,7 @@ timeline.addEventListener("click", function (e) {
       previewPlayBtn.textContent = "⏸ Pause";
       previewMsg.textContent = "";
       resetPlayProgress(frames[fi].first);
-      feedFrames(fi);
-      var iv = 40;
+      feedFrames(fi);      var iv = 40;
       if (currentData && currentData.streamInfo) {
         var fpsN = parseFloat(currentData.streamInfo.fps);
         if (fpsN > 0) iv = Math.max(1, Math.round(1000 / fpsN));
@@ -1106,7 +1112,7 @@ timeline.addEventListener("click", function (e) {
           feedFrames(Math.min(play.curFrame + 10, frames.length - 1));
         }
       }, iv);
-    });
+    }, true);
   }
 
 
@@ -1732,13 +1738,25 @@ timeline.addEventListener("click", function (e) {
     if (!frames || frames.length === 0) return;
     var fi = frameIndexOfSlice(sliceIndex);
     if (fi < 0) fi = 0;
-    if (findKeyFrame(fi) < 0) { previewMsg.textContent = "Key frame not found"; return; }
+
+    // 已解码的帧直接显示（顺序 seek 关键优化）
+    if (play.frames[fi]) {
+      showPlayFrame(fi);
+      return;
+    }
+
+    var keyFi = findKeyFrame(fi);
+    if (keyFi < 0) { previewMsg.textContent = "Key frame not found"; return; }
+
+    // 往前 seek（目标帧在已解码位置之前）需要 reset + 从关键帧重新解码
+    var needReset = (play.feedFrame > fi);
 
     var pf = frames[fi];
     previewHint.textContent = "Decoding... (POC " + (pf ? pf.poc : "?") + ")";
     previewMsg.textContent = "";
 
     initPlayDecoder(function () {
+      if (needReset) play.feedFrame = keyFi - 1;
       feedFrames(fi);
       var waited = 0;
       var check = setInterval(function () {
@@ -1754,7 +1772,7 @@ timeline.addEventListener("click", function (e) {
           if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
         }
       }, 10);
-    });
+    }, needReset);
   }
 
   // HDR
