@@ -288,9 +288,10 @@ td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
   .timeline-panel .timeline-wrap { padding: 4px 6px 8px; }
 
   /* 预览画面移动端全宽 */
+  .preview-view { flex: 1 1 auto; min-height: 0; overflow: auto; }
   .preview-wrap { flex-direction: column; padding: 8px 10px 16px; }
-  .preview-canvas { max-width: 100%; max-height: 45vh; }
-  .preview-side { max-width: 100%; min-width: 0; width: 100%; }
+  .preview-side { order: -1; max-width: 100%; min-width: 0; width: 100%; }
+  .preview-canvas { max-width: 100%; max-height: 40vh; }
 
   /* NAL 列表列宽收紧 */
   .c-offset { flex: 0 0 72px; }
