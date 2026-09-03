@@ -903,10 +903,10 @@ timeline.addEventListener("click", function (e) {
           if (types.indexOf(currentData.nalus[i].type) >= 0) play.params.push(i);
       }
 
-      if (play.decoder && play.decoder.state === "configured") {
-        if (needReset) {
-          try { play.decoder.reset(); } catch (e) { try { play.decoder.close(); } catch (e2) {} play.decoder = null; }
-        }
+      if (needReset && play.decoder) {
+        // 往前 seek：关闭旧 decoder（避免 reset 后参考帧/参数集状态不一致）
+        try { play.decoder.close(); } catch (e) {}
+        play.decoder = null;
       }
       if (!play.decoder) {
         var dec = new VideoDecoder({
