@@ -73,13 +73,16 @@
   function hex8(v) { var s = v.toString(16); while (s.length < 8) s = "0" + s; return "0x" + s; }
 
   // ---------- WASM 封装 ----------
-  function parseBuffer(bytes) {
+  function parseBuffer(bytes, hintCodec) {
     var ptr = Module._malloc(bytes.length);
     Module.HEAPU8.set(bytes, ptr);
 
-    var codecPtr = Module._detect_codec(ptr, bytes.length);
-    var codec = Module.UTF8ToString(codecPtr);
-    Module._hevc_free(codecPtr);
+    var codec = hintCodec;
+    if (!codec) {
+      var codecPtr = Module._detect_codec(ptr, bytes.length);
+      codec = Module.UTF8ToString(codecPtr);
+      Module._hevc_free(codecPtr);
+    }
 
     var outPtr;
     if (codec === "avc") outPtr = Module._avc_parse(ptr, bytes.length);
@@ -2049,6 +2052,7 @@ timeline.addEventListener("click", function (e) {
         var isImage = false;
         var imageW = 0, imageH = 0;
         var result = null;
+        var hintCodec = null;
         var simpleImageType = H26xDemux.detectImageType(rawBytes);
         if (simpleImageType === "image/jpeg") {
           var jpeg = (typeof JpegParser !== "undefined") ? JpegParser.parseJpeg(rawBytes) : null;
@@ -2170,6 +2174,7 @@ timeline.addEventListener("click", function (e) {
           currentDescription = null;
           currentNalLengthSize = 4;
           currentContainerInfo = null;
+          hintCodec = ts.codec;
           srcNote = " (MPEG-TS demuxed)";
         } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes) || H26xDemux.isWebm(rawBytes)) {
           var demuxedAv = H26xDemux.isWebm(rawBytes) ? H26xDemux.demuxWebm(rawBytes) : H26xDemux.parseIvf(rawBytes);
@@ -2214,7 +2219,7 @@ timeline.addEventListener("click", function (e) {
           currentNalLengthSize = 4;
           currentContainerInfo = null;
         }
-        if (!result) result = parseBuffer(fileBytes);
+        if (!result) result = parseBuffer(fileBytes, hintCodec);
         var t1 = performance.now();
         currentCodec = result.codec;
         currentData = result.data;

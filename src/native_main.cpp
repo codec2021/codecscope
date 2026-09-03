@@ -43,9 +43,16 @@ int main(int argc, char **argv)
   std::vector<uint8_t> data(size);
   in.read((char *)data.data(), size);
 
-  char *codec = detect_codec(data.data(), size);
-  std::string cc = codec ? codec : "unknown";
-  hevc_free(codec);
+  char *codec = nullptr;
+  std::string cc;
+  if(argc >= 3 && (std::string(argv[2]) == "avc" || std::string(argv[2]) == "hevc" || std::string(argv[2]) == "vvc"))
+    cc = argv[2];
+  else
+  {
+    codec = detect_codec(data.data(), size);
+    cc = codec ? codec : "unknown";
+    hevc_free(codec);
+  }
   std::cerr << "检测到码流类型: " << cc << std::endl;
 
   char *summary = nullptr;
@@ -66,7 +73,13 @@ int main(int argc, char **argv)
 
   std::size_t nalIndex = 0;
   if(argc >= 3)
-    nalIndex = (std::size_t)std::strtoul(argv[2], nullptr, 10);
+  {
+    const std::string arg2 = argv[2];
+    if(arg2 != "avc" && arg2 != "hevc" && arg2 != "vvc")
+      nalIndex = (std::size_t)std::strtoul(argv[2], nullptr, 10);
+  }
+  if(argc >= 4)
+    nalIndex = (std::size_t)std::strtoul(argv[3], nullptr, 10);
 
   char *syntax = nullptr;
   if(cc == "avc")

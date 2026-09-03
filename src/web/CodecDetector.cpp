@@ -54,7 +54,15 @@ namespace web
           // 先于 VVC 检测，避免 HEVC 的 nuh_layer_id ∈ {14,15,16} 被误判为 VVC
           uint8_t hevcType = (b0 >> 1) & 0x3F;
           if(hevcType == 32 || hevcType == 33 || hevcType == 34)
-            return "hevc";
+          {
+            // 校验 nuh_layer_id == 0，避免把 H.264 slice（如 0x41）误判为 HEVC VPS
+            if(remaining < 2)
+              return "hevc";
+            uint8_t layerId = ((b0 & 0x01) << 5) | (b1 >> 3);
+            uint8_t temporalIdPlus1 = b1 & 0x07;
+            if(layerId == 0 && temporalIdPlus1 >= 1)
+              return "hevc";
+          }
 
           // VVC VPS/SPS/PPS：第二字节高 5 位 in {14,15,16}
           if(remaining >= 2)
