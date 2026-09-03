@@ -909,15 +909,16 @@ timeline.addEventListener("click", function (e) {
         }
       }
       if (!play.decoder) {
-        play.decoder = new VideoDecoder({
+        var dec = new VideoDecoder({
           output: function (frame) { play.frames[frame.timestamp] = frame; },
           error: function (err) {
-            if (play.decoder !== this) return;
+            if (play.decoder !== dec) return; // 僵尸 decoder 忽略
             previewMsg.textContent = "Decode error: " + err.message;
             stopPlayback();
           }
         });
-        play.decoder.configure(conf);
+        play.decoder = dec;
+        dec.configure(conf);
       }
       done();
     }
