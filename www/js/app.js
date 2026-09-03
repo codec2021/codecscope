@@ -49,6 +49,7 @@
 
   var ROW_HEIGHT = 22;
   var timelineZoom = 1.15;  // 时间轴缩放倍数
+  var bitrateZoom = 1;      // 码率柱状图缩放倍数
   var setMobileView = null; // 移动端视图切换函数
   var selectedSlice = -1; // 时间轴上选中的帧
   var previewCanvasTouched = false; // 预览 canvas 是否已被帧画面覆盖
@@ -503,12 +504,17 @@
     html += '<span>Total: <b>' + fmtSize(total) + '</b></span>';
     html += '<span>Avg bitrate: <b>' + fmtBitrate(avgBitrate) + '</b></span>';
     html += '<span>Peak: <b>frame #' + maxIdx + ' (' + fmtBitrate(maxBitrate) + ')</b></span>';
+    html += '<span>Zoom: <button class="zoom-btn" onclick="window.__brZoom(-1)">−</button> <button class="zoom-btn" onclick="window.__brZoom(1)">+</button></span>';
     html += '</div>';
 
     var canvas = document.createElement("canvas");
     canvas.className = "bitrate-chart";
-    var w = Math.max(300, bitrateView.clientWidth - 24);
+    var vw = Math.max(300, bitrateView.clientWidth - 24);
     var h = 220;
+    var baseBarW = vw / frames.length;
+    var barW = Math.max(1, baseBarW * bitrateZoom);
+    var chartW = frames.length * barW;
+    var w = Math.max(vw, chartW);
     var dpr = window.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.round(w * dpr));
     canvas.height = Math.max(1, Math.round(h * dpr));
@@ -517,7 +523,6 @@
     var ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
 
-    var barW = w / frames.length;
     var chartH = h - 16;
     var baseY = h - 8;
 
@@ -556,6 +561,13 @@
     bitrateView.innerHTML = html;
     bitrateView.appendChild(canvas);
   }
+
+  window.__brZoom = function (d) {
+    if (d > 0) bitrateZoom = bitrateZoom * 1.5;
+    else bitrateZoom = bitrateZoom / 1.5;
+    bitrateZoom = Math.max(0.25, Math.min(64, bitrateZoom));
+    if (currentData) renderBitrate();
+  };
 
   // 帧时间轴（Slice 可视化，标记帧号 / POC）
   function renderTimeline() {
