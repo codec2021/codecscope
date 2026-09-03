@@ -8,3 +8,36 @@ dist/
 
 # 本地 emsdk（可选，如放在项目内）
 emsdk/
+
+# 本地媒体文件（绝对不上传）
+*.ts
+*.m2ts
+*.mts
+*.mp4
+*.m4v
+*.mov
+*.mkv
+*.webm
+*.h264
+*.h265
+*.h266
+*.264
+*.265
+*.266
+*.avc
+*.hevc
+*.vvc
+*.av1
+*.ivf
+*.obu
+*.bin
+*.bit
+*.heic
+*.heif
+*.avif
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.bmp
