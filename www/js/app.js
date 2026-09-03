@@ -1120,11 +1120,17 @@ timeline.addEventListener("click", function (e) {
       var ii = frameIndexOfSlice(selectedSlice);
       if (ii >= 0) fi = ii;
     }
-    if (findKeyFrame(fi) < 0) { previewMsg.textContent = "Key frame not found"; return; }
+    var kf = findKeyFrame(fi);
+    if (kf < 0) {
+      // 目标帧之前没有关键帧（如 TS 流开头缺 SPS/PPS/IDR）：从第一个关键帧开始播放
+      kf = (timeline._keyFrames && timeline._keyFrames.length > 0) ? timeline._keyFrames[0] : -1;
+      if (kf < 0) { previewMsg.textContent = "Key frame not found"; return; }
+      fi = kf;
+    }
     buildPlayOrder();
     initPlayDecoder(function () {
       play.active = true;
-      play.feedFrame = -1;
+      play.feedFrame = kf - 1;
       if (play.displayOrder) {
         // 显示顺序模式：从选中帧在 order 里的位置开始，按 POC 顺序显示
         play.orderPos = 0;
