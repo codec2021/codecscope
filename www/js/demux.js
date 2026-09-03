@@ -752,6 +752,106 @@
     return { codec: "av1", frames: frames, obus: obus, width: picW, height: picH, profile: profile, level: level };
   }
 
+  // ---------- MPEG-TS (Transport Stream) ----------
+  function isTs(d) {
+    if (d.length < 188 * 2) return false;
+    // 同步字节 0x47 在 188 字节对齐位置
+    for (var i = 0; i < 3; i++) {
+      if (d[i * 188] !== 0x47) return false;
+    }
+    return true;
+  }
+
+  function demuxTs(d) {
+    if (!isTs(d)) return null;
+    var pmtPid = -1, videoPid = -1, videoCodec = null;
+
+    // 第一遍：解析 PAT（PID 0）和 PMT，找视频 PID
+    for (var pos = 0; pos + 188 <= d.length; pos += 188) {
+      if (d[pos] !== 0x47) continue;
+      var pid = ((d[pos + 1] & 0x1F) << 8) | d[pos + 2];
+      var afc = (d[pos + 3] >> 4) & 0x03;
+      var pusi = (d[pos + 1] >> 6) & 0x01;
+      if (!(afc & 0x01)) continue; // 无 payload
+      var payloadStart = pos + 4;
+      if (afc & 0x02) { var afl = d[payloadStart]; payloadStart += 1 + afl; if (payloadStart >= pos + 188) continue; }
+      if (!pusi) continue; // 只解析 PUSI=1 的 section 起始包
+
+      var p = payloadStart;
+      var pointer = d[p]; p++;
+      if (p + pointer + 3 > pos + 188) continue;
+      p += pointer;
+      var tableId = d[p];
+
+      if (pid === 0 && tableId === 0x00) {
+        // PAT
+        var sectionLen = ((d[p + 1] & 0x0F) << 8) | d[p + 2];
+        var q = p + 8; // 跳过 table_id, section_length, ts_id, version, sec_num, last_sec_num
+        var qEnd = p + 3 + sectionLen - 4; // 减去 CRC32
+        while (q + 4 <= qEnd) {
+          var progNum = (d[q] << 8) | d[q + 1];
+          if (progNum !== 0) pmtPid = ((d[q + 2] & 0x1F) << 8) | d[q + 3];
+          q += 4;
+        }
+      } else if (pid === pmtPid && pmtPid > 0 && tableId === 0x02) {
+        // PMT
+        var sl2 = ((d[p + 1] & 0x0F) << 8) | d[p + 2];
+        var progInfoLen = ((d[p + 10] & 0x0F) << 8) | d[p + 11];
+        var q2 = p + 12 + progInfoLen;
+        var q2End = p + 3 + sl2 - 4;
+        while (q2 + 5 <= q2End) {
+          var streamType = d[q2];
+          var esPid = ((d[q2 + 1] & 0x1F) << 8) | d[q2 + 2];
+          var esInfoLen = ((d[q2 + 3] & 0x0F) << 8) | d[q2 + 4];
+          if (streamType === 0x1B) { videoPid = esPid; videoCodec = "avc"; }
+          else if (streamType === 0x24) { videoPid = esPid; videoCodec = "hevc"; }
+          if (videoPid >= 0) break;
+          q2 += 5 + esInfoLen;
+        }
+      }
+      if (videoPid >= 0) break;
+    }
+
+    if (videoPid < 0) return null;
+
+    // 第二遍：提取视频 PID 的 PES payload，重组 Annex B
+    var chunks = [];
+    for (var pos2 = 0; pos2 + 188 <= d.length; pos2 += 188) {
+      if (d[pos2] !== 0x47) continue;
+      var pid2 = ((d[pos2 + 1] & 0x1F) << 8) | d[pos2 + 2];
+      if (pid2 !== videoPid) continue;
+      var afc2 = (d[pos2 + 3] >> 4) & 0x03;
+      var pusi2 = (d[pos2 + 1] >> 6) & 0x01;
+      if (!(afc2 & 0x01)) continue;
+      var ps2 = pos2 + 4;
+      if (afc2 & 0x02) { var afl2 = d[ps2]; ps2 += 1 + afl2; if (ps2 >= pos2 + 188) continue; }
+
+      var pl = d.subarray(ps2, pos2 + 188);
+      if (pusi2) {
+        // PES header：跳过 00 00 01 + stream_id + PES_length(2) + flags + header_data_length
+        if (pl.length >= 6 && pl[0] === 0 && pl[1] === 0 && pl[2] === 1) {
+          var hdrDataLen = pl[8];
+          var dataStart = 9 + hdrDataLen;
+          if (dataStart < pl.length) chunks.push(pl.subarray(dataStart));
+        }
+      } else {
+        chunks.push(pl);
+      }
+    }
+
+    var totalSize = 0;
+    for (var ci = 0; ci < chunks.length; ci++) totalSize += chunks[ci].length;
+    if (totalSize === 0) return null;
+    var annexb = new Uint8Array(totalSize);
+    var aw = 0;
+    for (var ci2 = 0; ci2 < chunks.length; ci2++) {
+      annexb.set(chunks[ci2], aw);
+      aw += chunks[ci2].length;
+    }
+
+    return { codec: videoCodec, annexb: annexb, description: null, nalLengthSize: 4 };
+  }
+
   // ---------- WebM/Matroska (EBML) ----------
   function isWebm(d) { return d.length >= 4 && d[0] === 0x1A && d[1] === 0x45 && d[2] === 0xDF && d[3] === 0xA3; }
 
@@ -1528,6 +1628,8 @@
     demuxAv1Mp4: demuxAv1Mp4,
     isWebm: isWebm,
     demuxWebm: demuxWebm,
+    isTs: isTs,
+    demuxTs: demuxTs,
     isAvif: isAvif,
     parseAvif: parseAvif
   };

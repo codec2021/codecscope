@@ -2160,6 +2160,17 @@ timeline.addEventListener("click", function (e) {
             currentContainerInfo = H26xDemux.parseContainerInfo(rawBytes);
             srcNote = " (MP4 demuxed)";
           }
+        } else if (H26xDemux.isTs(rawBytes)) {
+          var ts = H26xDemux.demuxTs(rawBytes);
+          if (!ts || !ts.annexb || !ts.annexb.length) {
+            setStatus("TS demux failed: no video track found");
+            return;
+          }
+          fileBytes = ts.annexb;
+          currentDescription = null;
+          currentNalLengthSize = 4;
+          currentContainerInfo = null;
+          srcNote = " (MPEG-TS demuxed)";
         } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes) || H26xDemux.isWebm(rawBytes)) {
           var demuxedAv = H26xDemux.isWebm(rawBytes) ? H26xDemux.demuxWebm(rawBytes) : H26xDemux.parseIvf(rawBytes);
           if (!demuxedAv || !demuxedAv.frames || !demuxedAv.frames.length) {
