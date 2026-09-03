@@ -473,6 +473,13 @@
     var frames = timeline._frames || [];
     if (frames.length === 0) { bitrateView.innerHTML = ""; return; }
 
+    // 帧率：优先实际帧率，否则默认 30fps
+    var fps = 30;
+    if (currentData.streamInfo && currentData.streamInfo.fps) {
+      var f0 = parseFloat(currentData.streamInfo.fps);
+      if (f0 > 0) fps = f0;
+    }
+
     var sizes = new Array(frames.length);
     var total = 0, maxSize = 0, maxIdx = 0;
     for (var f = 0; f < frames.length; f++) {
@@ -487,23 +494,21 @@
       if (sz > maxSize) { maxSize = sz; maxIdx = f; }
     }
 
-    var fps = 0;
-    if (currentData.streamInfo) fps = parseFloat(currentData.streamInfo.fps) || 0;
-    var avgBytes = total / frames.length;
-    var bitrate = fps > 0 ? total * 8 * fps : 0;
+    var maxBitrate = maxSize * 8 * fps;                 // 峰值瞬时码率 (bps)
+    var avgBitrate = frames.length > 0 ? total * 8 * fps / frames.length : 0;
 
     var html = '<div class="bitrate-stats">';
     html += '<span>Frames: <b>' + frames.length + '</b></span>';
+    html += '<span>FPS: <b>' + fps + '</b></span>';
     html += '<span>Total: <b>' + fmtSize(total) + '</b></span>';
-    html += '<span>Avg frame: <b>' + fmtSize(Math.round(avgBytes)) + '</b></span>';
-    if (bitrate > 0) html += '<span>Avg bitrate: <b>' + fmtBitrate(bitrate) + '</b></span>';
-    html += '<span>Peak: <b>frame #' + maxIdx + ' (' + fmtSize(maxSize) + ')</b></span>';
+    html += '<span>Avg bitrate: <b>' + fmtBitrate(avgBitrate) + '</b></span>';
+    html += '<span>Peak: <b>frame #' + maxIdx + ' (' + fmtBitrate(maxBitrate) + ')</b></span>';
     html += '</div>';
 
     var canvas = document.createElement("canvas");
     canvas.className = "bitrate-chart";
     var w = Math.max(300, bitrateView.clientWidth - 24);
-    var h = 180;
+    var h = 220;
     var dpr = window.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.round(w * dpr));
     canvas.height = Math.max(1, Math.round(h * dpr));
@@ -513,17 +518,40 @@
     ctx.scale(dpr, dpr);
 
     var barW = w / frames.length;
-    var chartH = h - 14;
+    var chartH = h - 16;
+    var baseY = h - 8;
+
+    // 柱状图：每帧瞬时码率
     for (var i = 0; i < frames.length; i++) {
-      var bh = maxSize > 0 ? Math.max(1, (sizes[i] / maxSize) * chartH) : 0;
+      var bit = sizes[i] * 8 * fps;
+      var bh = maxBitrate > 0 ? Math.max(1, (bit / maxBitrate) * chartH) : 0;
       var x = i * barW;
       ctx.fillStyle = (i === maxIdx) ? "#e05555" : "#4d94e8";
-      ctx.fillRect(x, h - bh - 8, Math.max(0.5, barW - 0.5), bh);
+      ctx.fillRect(x, baseY - bh, Math.max(0.5, barW - 0.5), bh);
     }
+
+    // 累计平均码率曲线
+    ctx.strokeStyle = "#00d68f";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    var cumBytes = 0;
+    for (var j = 0; j < frames.length; j++) {
+      cumBytes += sizes[j];
+      var cumAvg = cumBytes * 8 * fps / (j + 1);
+      var cy = baseY - (maxBitrate > 0 ? (cumAvg / maxBitrate) * chartH : 0);
+      var cx = j * barW + barW / 2;
+      if (j === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+
     ctx.fillStyle = "#888";
     ctx.font = "9px monospace";
-    ctx.fillText("0", 2, h - 1);
-    ctx.fillText(fmtSize(maxSize), Math.max(0, w - 60), 10);
+    ctx.fillText("0", 2, baseY);
+    ctx.fillStyle = "#00d68f";
+    ctx.fillText("avg " + fmtBitrate(avgBitrate), 6, 12);
+    ctx.fillStyle = "#e05555";
+    ctx.fillText("peak " + fmtBitrate(maxBitrate), Math.max(0, w - 120), 12);
 
     bitrateView.innerHTML = html;
     bitrateView.appendChild(canvas);
