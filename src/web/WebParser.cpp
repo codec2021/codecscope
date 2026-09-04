@@ -497,7 +497,7 @@ namespace web
        m_lastSPS -> vui_parameters.vui_time_scale > 0)
     {
       fps = (double)m_lastSPS -> vui_parameters.vui_time_scale /
-            (2.0 * (double)m_lastSPS -> vui_parameters.vui_num_units_in_tick);
+            (double)m_lastSPS -> vui_parameters.vui_num_units_in_tick;
     }
     out += ",\"fps\":" + formatDouble(fps);
     out += "}";
