@@ -190,6 +190,19 @@
     if (bitsPerSec >= 1000000) return (bitsPerSec / 1000000).toFixed(1) + " Mb/s";
     return (bitsPerSec / 1000).toFixed(0) + " kb/s";
   }
+  function computeBitrate() {
+    // 无容器时按 MediaInfo 思路：视频流字节 × 8 ÷ 时长（帧数 ÷ 帧率）
+    var frames = timeline._frames;
+    if (!frames || frames.length === 0) return 0;
+    var fps = 30;
+    if (currentData.streamInfo && currentData.streamInfo.fps) {
+      var f0 = parseFloat(currentData.streamInfo.fps);
+      if (f0 > 0) fps = f0;
+    }
+    var bytes = (fileBytes && fileBytes.length) ? fileBytes.length : 0;
+    if (!bytes) return 0;
+    return bytes * 8 * fps / frames.length;
+  }
   function buildMediaInfoData() {
     var si = currentData.streamInfo;
     var hdr = currentData.hdr || {};
@@ -211,6 +224,8 @@
     } else {
       generalChildren.push({ n: "Format: " + codecFullName() });
       generalChildren.push({ n: "File size: " + fmtSize(currentData.totalSize) });
+      var calcBr = computeBitrate();
+      if (calcBr > 0) generalChildren.push({ n: "Overall bit rate: " + fmtBitrate(calcBr) });
     }
     if (si.fps > 0) generalChildren.push({ n: "Frame rate: " + si.fps + " FPS" });
     var general = { n: "General", c: generalChildren };
@@ -237,6 +252,10 @@
     }
     if (vTrack && vTrack.seconds) videoChildren.push({ n: "Duration: " + fmtDuration(vTrack.seconds) });
     if (vTrack && vTrack.bitrate) videoChildren.push({ n: "Bit rate: " + fmtBitrate(vTrack.bitrate) });
+    else if (!ci || !ci.isContainer) {
+      var vCalcBr = computeBitrate();
+      if (vCalcBr > 0) videoChildren.push({ n: "Bit rate: " + fmtBitrate(vCalcBr) });
+    }
     var vw = (vTrack && vTrack.width) || hdr.picWidth;
     var vh = (vTrack && vTrack.height) || hdr.picHeight;
     if (vw) videoChildren.push({ n: "Width: " + vw + " pixels" });
