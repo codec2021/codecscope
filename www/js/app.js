@@ -506,35 +506,43 @@
     }
 
     var sizes = new Array(frames.length);
-    var total = 0, maxSize = 0, maxIdx = 0;
+    var ftypes = new Array(frames.length);   // 0=P 1=B 2=I
+    var total = 0, maxSize = 0, maxIdx = 0, minSize = Infinity, minIdx = 0;
+    var cntI = 0, cntP = 0, cntB = 0;
     for (var f = 0; f < frames.length; f++) {
       var fr = frames[f];
-      var sz = 0;
+      var sz = 0, hasI = false, hasP = false;
       for (var k = 0; k < fr.slices.length; k++) {
-        var nal = currentData.nalus[timeline._slices[fr.slices[k]].index];
+        var s = timeline._slices[fr.slices[k]];
+        var nal = currentData.nalus[s.index];
         if (nal) sz += nal.length;
+        if (s.type === 2) hasI = true;
+        else if (s.type === 0) hasP = true;
       }
       sizes[f] = sz;
+      ftypes[f] = hasI ? 2 : (hasP ? 0 : 1);
+      if (ftypes[f] === 2) cntI++; else if (ftypes[f] === 0) cntP++; else cntB++;
       total += sz;
       if (sz > maxSize) { maxSize = sz; maxIdx = f; }
+      if (sz < minSize) { minSize = sz; minIdx = f; }
     }
 
     var maxBitrate = maxSize * 8 * fps;                 // 峰值瞬时码率 (bps)
+    var minBitrate = minSize * 8 * fps;
     var avgBitrate = frames.length > 0 ? total * 8 * fps / frames.length : 0;
 
     var html = '<div class="bitrate-stats">';
     html += '<span>Frames: <b>' + frames.length + '</b></span>';
     html += '<span>FPS: <b>' + fps + '</b></span>';
     html += '<span>Total: <b>' + fmtSize(total) + '</b></span>';
-    html += '<span>Avg bitrate: <b>' + fmtBitrate(avgBitrate) + '</b></span>';
-    html += '<span>Peak: <b>frame #' + maxIdx + ' (' + fmtBitrate(maxBitrate) + ')</b></span>';
+    html += '<span>Avg: <b style="color:#00d68f">' + fmtBitrate(avgBitrate) + '</b></span>';
+    html += '<span>Peak: <b style="color:#e05555">' + fmtBitrate(maxBitrate) + ' @ #' + maxIdx + '</b></span>';
+    html += '<span>Min: <b style="color:#4d94e8">' + fmtBitrate(minBitrate) + ' @ #' + minIdx + '</b></span>';
+    html += '<span class="br-legend"><i style="background:#E02020"></i>I ' + cntI + ' <i style="background:#4d94e8"></i>P ' + cntP + ' <i style="background:#00B050"></i>B ' + cntB + '</span>';
     html += '<span class="br-hover"></span>';
     html += '<span>Zoom: <button class="zoom-btn" onclick="window.__brZoom(-1)">−</button> <button class="zoom-btn" onclick="window.__brZoom(1)">+</button></span>';
     html += '</div>';
 
-    var canvas = document.createElement("canvas");
-    canvas.className = "bitrate-chart";
-    canvas.style.cursor = "pointer";
     var vw = Math.max(300, bitrateView.clientWidth - 24);
     var h = 220;
     var baseBarW = vw / frames.length;
@@ -542,6 +550,14 @@
     var chartW = frames.length * barW;
     var w = Math.max(vw, chartW);
     var dpr = window.devicePixelRatio || 1;
+
+    var wrap = document.createElement("div");
+    wrap.className = "br-chart-wrap";
+    wrap.style.width = w + "px";
+
+    var canvas = document.createElement("canvas");
+    canvas.className = "bitrate-chart";
+    canvas.style.cursor = "crosshair";
     canvas.width = Math.max(1, Math.round(w * dpr));
     canvas.height = Math.max(1, Math.round(h * dpr));
     canvas.style.width = w + "px";
@@ -551,18 +567,16 @@
 
     var chartH = h - 16;
     var baseY = h - 8;
+    var tcolors = { 2: "#E02020", 0: "#4d94e8", 1: "#00B050" };
 
-    // 柱状图：每帧瞬时码率
+    // 柱状图：每帧瞬时码率，按帧类型着色
     for (var i = 0; i < frames.length; i++) {
       var bit = sizes[i] * 8 * fps;
       var bh = maxBitrate > 0 ? Math.max(1, (bit / maxBitrate) * chartH) : 0;
       var x = i * barW;
-      if (i === selectedFrame) ctx.fillStyle = "#ffffff";
-      else if (i === maxIdx) ctx.fillStyle = "#e05555";
-      else ctx.fillStyle = "#4d94e8";
+      ctx.fillStyle = (i === selectedFrame) ? "#ffffff" : (tcolors[ftypes[i]] || "#888");
       ctx.fillRect(x, baseY - bh, Math.max(0.5, barW - 0.5), bh);
       if (i === selectedFrame) {
-        // 选中帧顶部标记
         ctx.fillStyle = "#ffd75e";
         ctx.fillRect(x, baseY - bh - 4, Math.max(0.5, barW - 0.5), 3);
       }
@@ -583,6 +597,20 @@
     }
     ctx.stroke();
 
+    // 水平标记线：平均（绿虚线）、峰值（红虚线）、最小（蓝虚线）
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1;
+    function hLine(y, color) {
+      ctx.strokeStyle = color;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+    if (maxBitrate > 0) {
+      hLine(baseY - (avgBitrate / maxBitrate) * chartH, "#00d68f");
+      hLine(baseY - chartH, "#e05555");
+      hLine(baseY - (minBitrate / maxBitrate) * chartH, "#4d94e8");
+    }
+    ctx.setLineDash([]);
+
     ctx.fillStyle = "#888";
     ctx.font = "9px monospace";
     ctx.fillText("0", 2, baseY);
@@ -591,8 +619,13 @@
     ctx.fillStyle = "#e05555";
     ctx.fillText("peak " + fmtBitrate(maxBitrate), Math.max(0, w - 120), 12);
 
+    var cursorEl = document.createElement("div");
+    cursorEl.className = "br-cursor";
+    wrap.appendChild(canvas);
+    wrap.appendChild(cursorEl);
+
     bitrateView.innerHTML = html;
-    bitrateView.appendChild(canvas);
+    bitrateView.appendChild(wrap);
 
     var hoverEl = bitrateView.querySelector(".br-hover");
     function frameAt(e) {
@@ -603,10 +636,13 @@
     }
     canvas.addEventListener("mousemove", function (e) {
       var f = frameAt(e);
-      if (f < 0) { hoverEl.textContent = ""; return; }
-      hoverEl.textContent = "Frame #" + f + " · " + fmtSize(sizes[f]) + " · " + fmtBitrate(sizes[f] * 8 * fps);
+      if (f < 0) { hoverEl.textContent = ""; cursorEl.style.display = "none"; return; }
+      var tname = ftypes[f] === 2 ? "I" : ftypes[f] === 0 ? "P" : "B";
+      hoverEl.textContent = "Frame #" + f + " · " + tname + " · " + fmtSize(sizes[f]) + " · " + fmtBitrate(sizes[f] * 8 * fps);
+      cursorEl.style.display = "block";
+      cursorEl.style.left = (f * barW + barW / 2) + "px";
     });
-    canvas.addEventListener("mouseleave", function () { hoverEl.textContent = ""; });
+    canvas.addEventListener("mouseleave", function () { hoverEl.textContent = ""; cursorEl.style.display = "none"; });
     canvas.addEventListener("click", function (e) {
       var f = frameAt(e);
       if (f < 0) return;
