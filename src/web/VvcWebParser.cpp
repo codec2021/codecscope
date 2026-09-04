@@ -334,7 +334,7 @@ namespace web
          m_lastSPS->sps.sps_num_units_in_tick > 0)
       {
         fps = (double)m_lastSPS->sps.sps_time_scale /
-              (double)m_lastSPS->sps.sps_num_units_in_tick;
+              (2.0 * (double)m_lastSPS->sps.sps_num_units_in_tick);
       }
       fpsS << fps;
       out += ",\"fps\":" + fpsS.str();

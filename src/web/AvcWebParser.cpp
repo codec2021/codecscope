@@ -359,7 +359,7 @@ namespace web
          m_lastSPS->sps.vui_parameters.time_scale > 0)
       {
         fps = (double)m_lastSPS->sps.vui_parameters.time_scale /
-              (double)m_lastSPS->sps.vui_parameters.num_units_in_tick;
+              (2.0 * (double)m_lastSPS->sps.vui_parameters.num_units_in_tick);
       }
       fpsS << fps;
       out += ",\"fps\":" + fpsS.str();
