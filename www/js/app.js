@@ -942,8 +942,20 @@ timeline.addEventListener("click", function (e) {
         }
         play.params = [];
         var types = currentCodec === "avc" ? [7, 8] : [32, 33, 34];
-        for (var i = 0; i < currentData.nalus.length; i++)
-          if (types.indexOf(currentData.nalus[i].type) >= 0) play.params.push(i);
+        var seen = {};
+        for (var i = 0; i < currentData.nalus.length; i++) {
+          var pn = currentData.nalus[i];
+          if (types.indexOf(pn.type) < 0) continue;
+          // 按内容去重（TS 等流会重复广播相同的 SPS/PPS）
+          var off = pn.offset, len = pn.length, startLen = 3;
+          if (off < 0 || off + len > fileBytes.length) continue;
+          if (fileBytes[off] === 0 && fileBytes[off + 1] === 0 && fileBytes[off + 2] === 0 && fileBytes[off + 3] === 1) startLen = 4;
+          else if (fileBytes[off] === 0 && fileBytes[off + 1] === 0 && fileBytes[off + 2] === 1) startLen = 3;
+          else startLen = 0;
+          var key = pn.type + ":";
+          for (var k = startLen; k < len; k++) key += fileBytes[off + k] + ",";
+          if (!seen[key]) { seen[key] = true; play.params.push(i); }
+        }
       }
 
       if (needReset && play.decoder) {
