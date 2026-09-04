@@ -496,6 +496,8 @@
     var frames = timeline._frames || [];
     if (frames.length === 0) { bitrateView.innerHTML = ""; return; }
 
+    var selectedFrame = selectedSlice >= 0 ? frameIndexOfSlice(selectedSlice) : -1;
+
     // 帧率：优先实际帧率，否则默认 30fps
     var fps = 30;
     if (currentData.streamInfo && currentData.streamInfo.fps) {
@@ -526,11 +528,13 @@
     html += '<span>Total: <b>' + fmtSize(total) + '</b></span>';
     html += '<span>Avg bitrate: <b>' + fmtBitrate(avgBitrate) + '</b></span>';
     html += '<span>Peak: <b>frame #' + maxIdx + ' (' + fmtBitrate(maxBitrate) + ')</b></span>';
+    html += '<span class="br-hover"></span>';
     html += '<span>Zoom: <button class="zoom-btn" onclick="window.__brZoom(-1)">−</button> <button class="zoom-btn" onclick="window.__brZoom(1)">+</button></span>';
     html += '</div>';
 
     var canvas = document.createElement("canvas");
     canvas.className = "bitrate-chart";
+    canvas.style.cursor = "pointer";
     var vw = Math.max(300, bitrateView.clientWidth - 24);
     var h = 220;
     var baseBarW = vw / frames.length;
@@ -553,8 +557,15 @@
       var bit = sizes[i] * 8 * fps;
       var bh = maxBitrate > 0 ? Math.max(1, (bit / maxBitrate) * chartH) : 0;
       var x = i * barW;
-      ctx.fillStyle = (i === maxIdx) ? "#e05555" : "#4d94e8";
+      if (i === selectedFrame) ctx.fillStyle = "#ffffff";
+      else if (i === maxIdx) ctx.fillStyle = "#e05555";
+      else ctx.fillStyle = "#4d94e8";
       ctx.fillRect(x, baseY - bh, Math.max(0.5, barW - 0.5), bh);
+      if (i === selectedFrame) {
+        // 选中帧顶部标记
+        ctx.fillStyle = "#ffd75e";
+        ctx.fillRect(x, baseY - bh - 4, Math.max(0.5, barW - 0.5), 3);
+      }
     }
 
     // 累计平均码率曲线
@@ -582,6 +593,26 @@
 
     bitrateView.innerHTML = html;
     bitrateView.appendChild(canvas);
+
+    var hoverEl = bitrateView.querySelector(".br-hover");
+    function frameAt(e) {
+      var rect = canvas.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var f = Math.floor(x / barW);
+      return (f >= 0 && f < frames.length) ? f : -1;
+    }
+    canvas.addEventListener("mousemove", function (e) {
+      var f = frameAt(e);
+      if (f < 0) { hoverEl.textContent = ""; return; }
+      hoverEl.textContent = "Frame #" + f + " · " + fmtSize(sizes[f]) + " · " + fmtBitrate(sizes[f] * 8 * fps);
+    });
+    canvas.addEventListener("mouseleave", function () { hoverEl.textContent = ""; });
+    canvas.addEventListener("click", function (e) {
+      var f = frameAt(e);
+      if (f < 0) return;
+      var sliceIdx = frames[f].first;
+      syncSelectionFromNal(timeline._slices[sliceIdx].index, true);
+    });
   }
 
   window.__brZoom = function (d) {
@@ -1927,6 +1958,7 @@ timeline.addEventListener("click", function (e) {
       selectedSlice = si;
       renderTimeline();
       if (!previewView.classList.contains("hidden")) previewFrame(si);
+      if (!bitrateView.classList.contains("hidden")) renderBitrate();
     }
     selectNal(nalIndex, scrollTo);
   }
@@ -1958,7 +1990,10 @@ timeline.addEventListener("click", function (e) {
     hexView.classList.toggle("hidden", which !== "hex");
     bitrateView.classList.toggle("hidden", which !== "bitrate");
     mediaInfoView.classList.toggle("hidden", which !== "mediainfo");
-    if (which === "preview" && currentData && !previewCanvasTouched) presetPreviewCanvas();
+    if (which === "preview" && currentData) {
+      if (!previewCanvasTouched) presetPreviewCanvas();
+      if (selectedSlice >= 0) previewFrame(selectedSlice);
+    }
     if (which === "bitrate" && currentData) renderBitrate();
     if (which === "mediainfo" && currentData && !mediaInfoView.dataset.rendered) {
       renderMediaInfo();
