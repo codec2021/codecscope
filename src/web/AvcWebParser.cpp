@@ -177,6 +177,12 @@ namespace web
       case AVC::NAL_IDR_SLICE:
       {
         std::shared_ptr<AVC::Slice_NAL> p = std::dynamic_pointer_cast<AVC::Slice_NAL>(pNALUnit);
+        if(p->m_processFailed)
+        {
+          e.info = "IDR Slice (parse failed)";
+          e.color = "#888888";
+          break;
+        }
         e.info = "IDR Slice #" + std::to_string(m_frameNum);
         e.color = "red";
         e.sliceType = 2; // I
@@ -194,6 +200,12 @@ namespace web
       case AVC::NAL_SLICE:
       {
         std::shared_ptr<AVC::Slice_NAL> p = std::dynamic_pointer_cast<AVC::Slice_NAL>(pNALUnit);
+        if(p->m_processFailed)
+        {
+          e.info = "Slice (parse failed)";
+          e.color = "#888888";
+          break;
+        }
         uint32_t st = p->slice.slice_type % 5;
         fillPocAndRefs(e, p.get());
         e.frameNum = p->slice.frame_num;
