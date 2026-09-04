@@ -264,6 +264,11 @@ td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
   .nal-panel { display: flex; flex-direction: column; height: 100%; }
   .syntax-panel { display: flex; flex-direction: column; height: 100%; }
 
+  /* 顶部标签栏换行，tab 可横向滚动，保证 Bitrate 等末尾 tab 可见 */
+  .panel-title { flex-wrap: wrap; row-gap: 4px; padding: 6px 8px; }
+  .tab-group { margin-left: 0; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+  .tab { flex: 0 0 auto; padding: 4px 10px; white-space: nowrap; }
+
   .bottom-panels { display: none; }
 
   /* 默认视图：NAL */
