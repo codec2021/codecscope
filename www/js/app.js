@@ -539,8 +539,8 @@
     html += '<span>Peak: <b style="color:#e05555">' + fmtBitrate(maxBitrate) + ' @ #' + maxIdx + '</b></span>';
     html += '<span>Min: <b style="color:#4d94e8">' + fmtBitrate(minBitrate) + ' @ #' + minIdx + '</b></span>';
     html += '<span class="br-legend"><i style="background:#E02020"></i>I ' + cntI + ' <i style="background:#4d94e8"></i>P ' + cntP + ' <i style="background:#00B050"></i>B ' + cntB + '</span>';
-    html += '<span class="br-hover"></span>';
     html += '<span>Zoom: <button class="zoom-btn" onclick="window.__brZoom(-1)">−</button> <button class="zoom-btn" onclick="window.__brZoom(1)">+</button></span>';
+    html += '<span class="br-hover"></span>';
     html += '</div>';
 
     var vw = Math.max(300, bitrateView.clientWidth - 24);
@@ -582,8 +582,8 @@
       }
     }
 
-    // 累计平均码率曲线
-    ctx.strokeStyle = "#00d68f";
+    // 累计平均码率曲线（黄色，随帧推进收敛到整体平均线）
+    ctx.strokeStyle = "#ffd75e";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     var cumBytes = 0;
@@ -597,27 +597,31 @@
     }
     ctx.stroke();
 
-    // 水平标记线：平均（绿虚线）、峰值（红虚线）、最小（蓝虚线）
+    // 水平标记线：平均（绿）、峰值（红）、最小（蓝），数值标注在各自线旁
     ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1;
-    function hLine(y, color) {
+    ctx.font = "9px monospace";
+    ctx.textBaseline = "alphabetic";
+    function hLine(y, color, label) {
       ctx.strokeStyle = color;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      ctx.fillStyle = color;
+      var ty = Math.max(10, y - 3);
+      ctx.fillText(label, 6, ty);
     }
     if (maxBitrate > 0) {
-      hLine(baseY - (avgBitrate / maxBitrate) * chartH, "#00d68f");
-      hLine(baseY - chartH, "#e05555");
-      hLine(baseY - (minBitrate / maxBitrate) * chartH, "#4d94e8");
+      var avgY = baseY - (avgBitrate / maxBitrate) * chartH;
+      var peakY = baseY - chartH;
+      var minY = baseY - (minBitrate / maxBitrate) * chartH;
+      hLine(avgY, "#00d68f", "avg " + fmtBitrate(avgBitrate));
+      hLine(peakY, "#e05555", "peak " + fmtBitrate(maxBitrate));
+      hLine(minY, "#4d94e8", "min " + fmtBitrate(minBitrate));
     }
     ctx.setLineDash([]);
 
     ctx.fillStyle = "#888";
     ctx.font = "9px monospace";
     ctx.fillText("0", 2, baseY);
-    ctx.fillStyle = "#00d68f";
-    ctx.fillText("avg " + fmtBitrate(avgBitrate), 6, 12);
-    ctx.fillStyle = "#e05555";
-    ctx.fillText("peak " + fmtBitrate(maxBitrate), Math.max(0, w - 120), 12);
 
     var cursorEl = document.createElement("div");
     cursorEl.className = "br-cursor";
@@ -761,6 +765,13 @@
       }
       ctx.strokeRect(hx + 0.5, barTop + 0.5, hlW, barH - 1);
       hlFrame = { slice: selectedSlice, x: hx, w: hlW };
+      // 自动滚动时间轴，让选中帧保持可见
+      var tlWrap = timeline.parentNode;
+      if (tlWrap && tlWrap.scrollWidth > tlWrap.clientWidth) {
+        var target = hx - tlWrap.clientWidth / 2;
+        if (target < 0) target = 0;
+        tlWrap.scrollLeft = target;
+      }
     } else {
       hlFrame.slice = -1;
     }
