@@ -424,11 +424,11 @@ void HevcParserImpl::processSliceHeader(std::shared_ptr<Slice> pslice, Bitstream
       }
 
       pslice -> five_minus_max_num_merge_cand = bs.getGolombU();
-      if (pslice->five_minus_max_num_merge_cand < 1 || pslice->five_minus_max_num_merge_cand > 4) {
+      if (pslice->five_minus_max_num_merge_cand > 4) {
           std::stringstream ss;
           ss << "five_minus_max_num_merge_cand = "
             << (int) pslice -> five_minus_max_num_merge_cand 
-            << ", but must be in range (1-5)";
+            << ", but must be in range (0-4)";
           onWarning(ss.str(), &info, Parser::OUT_OF_RANGE);
       }
     }
