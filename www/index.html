@@ -16,6 +16,8 @@
       <input type="file" id="fileInput" hidden accept="video/*,image/*,.h264,.h265,.hevc,.h266,.vvc,.266,.265,.264,.avc,.bin,.bit,.mp4,.m4v,.mov,.webm,.ts,.m2ts,.mts,.heic,.heif,.avif,.av1,.ivf,.obu,.png,.jpg,.jpeg,.gif,.webp,.bmp">
       <span id="fileName" class="file-name">No file loaded</span>
       <button id="helpBtn" class="btn btn-secondary" title="Help & About">? Help</button>
+      <button id="pluginBtn" class="btn btn-secondary" title="Load a SEI plugin (.js)">⚙ Plugin</button>
+      <input type="file" id="pluginInput" hidden accept=".js">
       <span class="version-badge">v1.0.0</span>
       <button id="openBtn" class="btn">Open File</button>
     </div>
@@ -164,6 +166,7 @@
   <script src="hevc.js"></script>
   <script src="js/demux.js"></script>
   <script src="js/jpeg.js"></script>
+  <script src="js/plugin.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

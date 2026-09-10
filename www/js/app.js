@@ -1986,7 +1986,15 @@ timeline.addEventListener("click", function (e) {
       rows[i].classList.toggle("selected", parseInt(rows[i].dataset.index, 10) === index);
     }
 
-    renderSyntax(nal.jpegSyntax || fetchNalSyntax(index));
+    var syntaxNode = nal.jpegSyntax || fetchNalSyntax(index);
+    if (!nal.jpegSyntax && /SEI/i.test(nal.typeName || "") && window.CodecScope && window.CodecScope.runSeiPlugin) {
+      var pnode = window.CodecScope.runSeiPlugin(fileBytes, nal, currentCodec);
+      if (pnode) {
+        if (!syntaxNode.c) syntaxNode.c = [];
+        syntaxNode.c.push(pnode);
+      }
+    }
+    renderSyntax(syntaxNode);
     renderHex(index);
 
     if (scrollTo) {
@@ -2399,6 +2407,41 @@ timeline.addEventListener("click", function (e) {
 
   openBtn.addEventListener("click", function () { fileInput.click(); });
   fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
+
+  // ---------- 插件加载 ----------
+  var pluginBtn = document.getElementById("pluginBtn");
+  var pluginInput = document.getElementById("pluginInput");
+  function loadPlugin(code, name) {
+    try {
+      var before = (window.CodecScope && window.CodecScope.getPlugins) ? window.CodecScope.getPlugins().length : 0;
+      var blob = new Blob([code], { type: "text/javascript" });
+      var url = URL.createObjectURL(blob);
+      var s = document.createElement("script");
+      s.onload = function () {
+        URL.revokeObjectURL(url);
+        var after = (window.CodecScope && window.CodecScope.getPlugins) ? window.CodecScope.getPlugins().length : 0;
+        setStatus("Plugin loaded: " + name + " · registered " + (after - before) + " SEI parser(s)");
+      };
+      s.onerror = function () {
+        URL.revokeObjectURL(url);
+        setStatus("Plugin load failed: " + name);
+      };
+      s.src = url;
+      document.head.appendChild(s);
+    } catch (err) {
+      setStatus("Plugin load error: " + err.message);
+    }
+  }
+  if (pluginBtn && pluginInput) {
+    pluginBtn.addEventListener("click", function () { pluginInput.click(); });
+    pluginInput.addEventListener("change", function () {
+      var f = pluginInput.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function (e) { loadPlugin(e.target.result, f.name); pluginInput.value = ""; };
+      reader.readAsText(f);
+    });
+  }
 
   function resetAll() {
     clearAll();
