@@ -1414,7 +1414,7 @@ VuiParameters HevcParserImpl::processVuiParameters(std::size_t sps_max_sub_layer
 
   vui.def_disp_win_left_offset = 0;
   vui.def_disp_win_right_offset = 0;
-  vui.def_disp_win_right_offset = 0;
+  vui.def_disp_win_top_offset = 0;
   vui.def_disp_win_bottom_offset = 0;
 
   if(vui.default_display_window_flag)
