@@ -192,6 +192,37 @@
     return { width: width, height: height, tree: c };
   }
 
+  // IJG 标准量化表（quality 50 基准）
+  var STD_LUMA = [16,11,10,16,24,40,51,61, 12,12,14,19,26,58,60,55,
+                  14,13,16,24,40,57,69,56, 14,17,22,29,51,87,80,62,
+                  18,22,37,56,68,109,103,77, 24,35,55,64,81,104,113,92,
+                  49,64,78,87,103,121,120,101, 72,92,95,98,112,100,103,99];
+  var STD_CHROMA = [17,18,24,47,99,99,99,99, 18,21,26,66,99,99,99,99,
+                    24,26,56,99,99,99,99,99, 47,66,99,99,99,99,99,99,
+                    99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99,
+                    99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99];
+
+  // 从量化表反推 IJG quality 值（近似）
+  function estimateQuality(vals) {
+    var lumaDiff = 0, chromaDiff = 0;
+    for (var i = 0; i < 64; i++) {
+      lumaDiff += Math.abs(vals[i] - STD_LUMA[i]);
+      chromaDiff += Math.abs(vals[i] - STD_CHROMA[i]);
+    }
+    var base = (lumaDiff <= chromaDiff) ? STD_LUMA : STD_CHROMA;
+    var sumV = 0, sumB = 0;
+    for (var j = 0; j < 64; j++) { sumV += vals[j]; sumB += base[j]; }
+    if (sumB === 0) return null;
+    var scale = sumV * 100 / sumB;
+    var quality;
+    if (scale > 100) quality = 5000 / scale;
+    else quality = (200 - scale) / 2;
+    quality = Math.round(quality);
+    if (quality < 0) quality = 0;
+    if (quality > 100) quality = 100;
+    return quality;
+  }
+
   function parseDqt(d, o, len) {
     var c = [];
     var p = o;
@@ -207,7 +238,7 @@
         vals.push(pq ? readU16(d, p) : d[p]);
         p += pq ? 2 : 1;
       }
-      c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" });
+      c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" + (precision === 8 ? "  ~ quality " + estimateQuality(vals) + "/100" : "") });
       var rows = [];
       for (var r = 0; r < 8; r++) rows.push(vals.slice(r * 8, r * 8 + 8).join(" "));
       rows.forEach(function (row) { c.push({ n: row }); });
