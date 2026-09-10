@@ -192,35 +192,40 @@
     return { width: width, height: height, tree: c };
   }
 
-  // IJG 标准量化表（quality 50 基准）
-  var STD_LUMA = [16,11,10,16,24,40,51,61, 12,12,14,19,26,58,60,55,
-                  14,13,16,24,40,57,69,56, 14,17,22,29,51,87,80,62,
-                  18,22,37,56,68,109,103,77, 24,35,55,64,81,104,113,92,
-                  49,64,78,87,103,121,120,101, 72,92,95,98,112,100,103,99];
-  var STD_CHROMA = [17,18,24,47,99,99,99,99, 18,21,26,66,99,99,99,99,
-                    24,26,56,99,99,99,99,99, 47,66,99,99,99,99,99,99,
+  // IJG 标准量化表（quality 50 基准），按 JPEG DQT 的 zigzag 顺序存储
+  var STD_LUMA = [16,11,12,14,12,10,16,14, 13,14,18,17,16,19,24,40,
+                  26,24,22,22,24,49,35,37, 29,40,58,51,61,60,57,51,
+                  56,55,64,72,92,78,64,68, 87,69,55,56,80,109,81,87,
+                  95,98,103,104,103,62,77,113, 121,112,100,120,92,101,103,99];
+  var STD_CHROMA = [17,18,18,24,21,24,47,26, 26,47,99,66,56,66,99,99,
+                    99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99,
                     99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99,
                     99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99];
 
-  // 从量化表反推 IJG quality 值（近似）
-  function estimateQuality(vals) {
-    var lumaDiff = 0, chromaDiff = 0;
+  // 用 IJG 公式生成某 quality 的标准量化表（jpegsnoop 同款算法）
+  // IJG: scale = q<50 ? 5000/q : 200-2q ;  value = (base*scale + 50) / 100
+  function buildIjqTable(base, quality) {
+    var scale = quality < 50 ? Math.floor(5000 / quality) : 200 - 2 * quality;
+    var t = new Array(64);
     for (var i = 0; i < 64; i++) {
-      lumaDiff += Math.abs(vals[i] - STD_LUMA[i]);
-      chromaDiff += Math.abs(vals[i] - STD_CHROMA[i]);
+      var v = Math.floor((base[i] * scale + 50) / 100);
+      t[i] = v < 1 ? 1 : (v > 255 ? 255 : v);
     }
-    var base = (lumaDiff <= chromaDiff) ? STD_LUMA : STD_CHROMA;
-    var sumV = 0, sumB = 0;
-    for (var j = 0; j < 64; j++) { sumV += vals[j]; sumB += base[j]; }
-    if (sumB === 0) return null;
-    var scale = sumV * 100 / sumB;
-    var quality;
-    if (scale > 100) quality = 5000 / scale;
-    else quality = (200 - scale) / 2;
-    quality = Math.round(quality);
-    if (quality < 0) quality = 0;
-    if (quality > 100) quality = 100;
-    return quality;
+    return t;
+  }
+
+  function tablesEqual(a, b) {
+    for (var i = 0; i < 64; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  // jpegsnoop 方式：遍历 quality 1-100，逐值精确匹配 IJG 标准量化表
+  function estimateQuality(vals) {
+    for (var q = 1; q <= 100; q++) {
+      if (tablesEqual(vals, buildIjqTable(STD_LUMA, q))) return q;
+      if (tablesEqual(vals, buildIjqTable(STD_CHROMA, q))) return q;
+    }
+    return null;
   }
 
   function parseDqt(d, o, len) {
@@ -238,7 +243,12 @@
         vals.push(pq ? readU16(d, p) : d[p]);
         p += pq ? 2 : 1;
       }
-      c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" + (precision === 8 ? "  ~ quality " + estimateQuality(vals) + "/100" : "") });
+      if (precision === 8) {
+        var qv = estimateQuality(vals);
+        c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" + (qv != null ? "  quality " + qv + "/100" : "  quality unknown (non-IJG)") });
+      } else {
+        c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" });
+      }
       var rows = [];
       for (var r = 0; r < 8; r++) rows.push(vals.slice(r * 8, r * 8 + 8).join(" "));
       rows.forEach(function (row) { c.push({ n: row }); });
