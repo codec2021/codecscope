@@ -204,6 +204,8 @@
 
   // 用 IJG 公式生成某 quality 的标准量化表（jpegsnoop 同款算法）
   // IJG: scale = q<50 ? 5000/q : 200-2q ;  value = (base*scale + 50) / 100
+  var currentPhotoshopQuality = null; // 当前文件的 Photoshop quality（APP13 0x0406）
+
   function buildIjqTable(base, quality) {
     var scale = quality < 50 ? Math.floor(5000 / quality) : 200 - 2 * quality;
     var t = new Array(64);
@@ -245,7 +247,10 @@
       }
       if (precision === 8) {
         var qv = estimateQuality(vals);
-        c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" + (qv != null ? "  quality " + qv + "/100" : "  quality unknown (non-IJG)") });
+        var qlabel = qv != null ? "quality " + qv + "/100"
+          : (currentPhotoshopQuality != null ? "quality unknown (non-IJG) · Photoshop " + currentPhotoshopQuality + "/12"
+          : "quality unknown (non-IJG)");
+        c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" + "  " + qlabel });
       } else {
         c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" });
       }
@@ -311,6 +316,38 @@
     return null;
   }
 
+  function readU32(d, o) { return ((d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]) >>> 0; }
+
+  // 解析 Photoshop APP13 的 8BIM 资源块，提取 JPEG quality（资源 ID 0x0406）
+  function parseApp13(d, o, len) {
+    var c = [];
+    if (ascii(d, o, 13) !== "Photoshop 3.0") return c;
+    var p = o + 14, end = o + len;
+    var quality = null;
+    while (p + 12 <= end) {
+      if (ascii(d, p, 4) !== "8BIM") break;
+      var rid = readU16(d, p + 4);
+      var nameLen = d[p + 6];
+      var nameStart = p + 7;
+      var dataStart = nameStart + nameLen;
+      if ((dataStart - p) & 1) dataStart++; // name 奇数长度，补 1 字节对齐
+      if (dataStart + 4 > end) break;
+      var size = readU32(d, dataStart);
+      var valStart = dataStart + 4;
+      if (rid === 0x0406 && size >= 2) {
+        quality = readU16(d, valStart);
+      }
+      p = valStart + size;
+      if ((p - o) & 1) p++;
+    }
+    if (quality != null) {
+      currentPhotoshopQuality = quality;
+      c.push({ n: "Photoshop JPEG quality = " + quality + " / 12" });
+    }
+    c.push({ n: "Adobe Photoshop Image Resource Block (8BIM)" });
+    return c;
+  }
+
   function parseApp2(d, o, len) {
     if (ascii(d, o, 11) === "ICC_PROFILE") {
       return [{ n: "ICC color profile" }];
@@ -331,6 +368,7 @@
   function parseJpeg(d) {
     if (d.length < 4 || d[0] !== 0xFF || d[1] !== 0xD8) return null;
 
+    currentPhotoshopQuality = null;
     var segments = [];
     var width = 0, height = 0;
     var pos = 2;
@@ -404,7 +442,8 @@
         var icc = parseApp2(d, contentStart, contentLen);
         if (icc) { syntax.c = icc; info = "ICC profile"; }
       } else if (marker === 0xED) {
-        if (ascii(d, contentStart, 13) === "Photoshop 3.0") { info = "Photoshop"; syntax.c = [{ n: "Adobe Photoshop IRB" }]; }
+        var irb = parseApp13(d, contentStart, contentLen);
+        if (irb.length) { info = "Photoshop"; syntax.c = irb; }
       } else if (marker === 0xEE) {
         var adobe = parseApp14(d, contentStart);
         if (adobe) { syntax.c = adobe; info = "Adobe"; }
