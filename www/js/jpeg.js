@@ -203,6 +203,8 @@
                     99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99];
 
   var currentPhotoshopQuality = null; // 当前文件的 Photoshop quality（APP13 0x0406）
+  var iccChunks = [];  // ICC profile 分块收集
+  var iccTotal = 0;
 
   // jpegsnoop 同款算法：对每个系数算 actual/base 的缩放百分比，取 64 系数平均，
   // 再用 IJG 反推公式换算 quality，并附带方差（衡量是否标准表的等比缩放）。
@@ -312,6 +314,88 @@
 
   function readU32(d, o) { return ((d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3]) >>> 0; }
 
+  function fourCC(d, o) {
+    var s = "";
+    for (var i = 0; i < 4; i++) { var c = d[o + i]; s += (c >= 32 && c <= 126) ? String.fromCharCode(c) : "?"; }
+    return s;
+  }
+
+  function readS15F16(d, o) {
+    var v = (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3];
+    if (v & 0x80000000) v -= 0x100000000;
+    return v / 65536.0;
+  }
+
+  var ICC_TAG_NAMES = {
+    desc: "Profile description", cprt: "Copyright", wtpt: "Media white point",
+    bkpt: "Media black point", rXYZ: "Red matrix column", gXYZ: "Green matrix column", bXYZ: "Blue matrix column",
+    rTRC: "Red tone curve", gTRC: "Green tone curve", bTRC: "Blue tone curve", kTRC: "Gray tone curve",
+    chad: "Chromatic adaptation", tech: "Technology", gamt: "Gamut", lumi: "Luminance",
+    dmnd: "Manufacturer description", dmdd: "Model description", calt: "Calibration date/time",
+    A2B0: "Device to PCS LUT", A2B1: "Device to PCS LUT", B2A0: "PCS to device LUT", B2A1: "PCS to device LUT"
+  };
+
+  function parseIccTag(d, offset, size, sig) {
+    var r = [];
+    if (offset + 8 > d.length) return r;
+    var type = fourCC(d, offset);
+    if (type === "XYZ ") {
+      var X = readS15F16(d, offset + 8), Y = readS15F16(d, offset + 12), Z = readS15F16(d, offset + 16);
+      r.push({ n: "X = " + X.toFixed(4) + ", Y = " + Y.toFixed(4) + ", Z = " + Z.toFixed(4) });
+    } else if (type === "desc") {
+      var cnt = readU32(d, offset + 8);
+      var s = ascii(d, offset + 12, Math.min(cnt, size - 12)).replace(/\0+$/, "");
+      if (s) r.push({ n: '"' + s + '"' });
+    } else if (type === "text") {
+      var t = ascii(d, offset + 8, size - 8).replace(/\0+$/, "");
+      if (t) r.push({ n: '"' + t + '"' });
+    } else if (type === "curv") {
+      var count = readU32(d, offset + 8);
+      if (count === 0) r.push({ n: "Identity curve (gamma 1.0)" });
+      else if (count === 1) r.push({ n: "Gamma = " + (readU16(d, offset + 12) / 256).toFixed(2) });
+      else r.push({ n: "Curve with " + count + " points" });
+    } else if (type === "mft1" || type === "mft2" || type === "para" || type === "mlut" || type === "sf32") {
+      r.push({ n: "(" + type + " curve/lut)" });
+    } else if (type === "chrm") {
+      r.push({ n: "(chromaticity)" });
+    }
+    return r;
+  }
+
+  function parseIcc(d) {
+    if (d.length < 128) return null;
+    var c = [];
+    var profileSize = readU32(d, 0);
+    var version = readU32(d, 8);
+    var versionStr = ((version >> 24) & 0xFF) + "." + ((version >> 20) & 0x0F) + "." + ((version >> 16) & 0x0F);
+    var deviceClass = fourCC(d, 12), colorSpace = fourCC(d, 16), pcs = fourCC(d, 20);
+    var platform = fourCC(d, 40), manufacturer = fourCC(d, 48), model = fourCC(d, 52);
+    var renderingIntent = readU32(d, 64), creator = fourCC(d, 80);
+    var DC = { scnr: "Input (scanner)", mntr: "Display (monitor)", prtr: "Output (printer)", link: "Device link", spac: "Color space conversion", abst: "Abstract", nmcl: "Named color" };
+    var RI = ["Perceptual", "Relative colorimetric", "Saturation", "Absolute colorimetric"];
+
+    c.push({ n: "ICC profile " + profileSize + " bytes" });
+    c.push({ n: "Version " + versionStr });
+    c.push({ n: "Device class = " + (DC[deviceClass] || deviceClass) });
+    c.push({ n: "Data color space = " + colorSpace });
+    c.push({ n: "PCS (connection space) = " + pcs });
+    if (manufacturer && manufacturer !== "????") c.push({ n: "Device manufacturer = " + manufacturer });
+    if (model && model !== "????") c.push({ n: "Device model = " + model });
+    c.push({ n: "Rendering intent = " + (RI[renderingIntent] || ("#" + renderingIntent)) });
+    if (creator && creator !== "????") c.push({ n: "Profile creator = " + creator });
+
+    var tagCount = readU32(d, 128);
+    c.push({ n: "Tag count = " + tagCount });
+    for (var i = 0; i < tagCount && 132 + i * 12 + 12 <= d.length; i++) {
+      var base = 132 + i * 12;
+      var sig = fourCC(d, base);
+      var offset = readU32(d, base + 4), size = readU32(d, base + 8);
+      var name = ICC_TAG_NAMES[sig] || "";
+      c.push({ n: "Tag '" + sig + "'" + (name ? " (" + name + ")" : "") + ", " + size + " bytes", c: parseIccTag(d, offset, size, sig) });
+    }
+    return c;
+  }
+
   // 解析 Photoshop APP13 的 8BIM 资源块，提取 JPEG quality（资源 ID 0x0406）
   function parseApp13(d, o, len) {
     var c = [];
@@ -343,10 +427,25 @@
   }
 
   function parseApp2(d, o, len) {
-    if (ascii(d, o, 11) === "ICC_PROFILE") {
-      return [{ n: "ICC color profile" }];
+    if (ascii(d, o, 11) !== "ICC_PROFILE") return null;
+    var chunkIndex = d[o + 12];
+    var totalChunks = d[o + 13];
+    var chunkData = d.subarray(o + 14, o + len);
+    iccTotal = totalChunks;
+    iccChunks.push({ index: chunkIndex, data: chunkData });
+
+    if (iccChunks.length >= iccTotal) {
+      iccChunks.sort(function (a, b) { return a.index - b.index; });
+      var total = 0;
+      for (var i = 0; i < iccChunks.length; i++) total += iccChunks[i].data.length;
+      var buf = new Uint8Array(total);
+      var off = 0;
+      for (var j = 0; j < iccChunks.length; j++) { buf.set(iccChunks[j].data, off); off += iccChunks[j].data.length; }
+      iccChunks = []; iccTotal = 0;
+      var iccTree = parseIcc(buf);
+      return iccTree || [{ n: "ICC color profile (" + buf.length + " bytes)" }];
     }
-    return null;
+    return [{ n: "ICC profile chunk " + (chunkIndex + 1) + "/" + totalChunks + " (" + chunkData.length + " bytes)" }];
   }
 
   function markerInfo(marker) {
