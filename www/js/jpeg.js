@@ -202,32 +202,26 @@
                     99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99,
                     99,99,99,99,99,99,99,99, 99,99,99,99,99,99,99,99];
 
-  // 用 IJG 公式生成某 quality 的标准量化表（jpegsnoop 同款算法）
-  // IJG: scale = q<50 ? 5000/q : 200-2q ;  value = (base*scale + 50) / 100
   var currentPhotoshopQuality = null; // 当前文件的 Photoshop quality（APP13 0x0406）
 
-  function buildIjqTable(base, quality) {
-    var scale = quality < 50 ? Math.floor(5000 / quality) : 200 - 2 * quality;
-    var t = new Array(64);
+  // jpegsnoop 同款算法：对每个系数算 actual/base 的缩放百分比，取 64 系数平均，
+  // 再用 IJG 反推公式换算 quality，并附带方差（衡量是否标准表的等比缩放）。
+  function estimateQuality(vals, tq) {
+    var base = (tq === 0) ? STD_LUMA : STD_CHROMA;
+    var sum = 0, sumSqr = 0, allOnes = true;
     for (var i = 0; i < 64; i++) {
-      var v = Math.floor((base[i] * scale + 50) / 100);
-      t[i] = v < 1 ? 1 : (v > 255 ? 255 : v);
+      var pct = 100.0 * vals[i] / base[i];
+      sum += pct;
+      sumSqr += pct * pct;
+      if (vals[i] !== 1) allOnes = false;
     }
-    return t;
-  }
-
-  function tablesEqual(a, b) {
-    for (var i = 0; i < 64; i++) if (a[i] !== b[i]) return false;
-    return true;
-  }
-
-  // jpegsnoop 方式：遍历 quality 1-100，逐值精确匹配 IJG 标准量化表
-  function estimateQuality(vals) {
-    for (var q = 1; q <= 100; q++) {
-      if (tablesEqual(vals, buildIjqTable(STD_LUMA, q))) return q;
-      if (tablesEqual(vals, buildIjqTable(STD_CHROMA, q))) return q;
-    }
-    return null;
+    var mean = sum / 64;
+    var variance = sumSqr / 64 - mean * mean;
+    var quality;
+    if (allOnes) quality = 100;
+    else if (mean <= 100) quality = (200 - mean) / 2;
+    else quality = 5000 / mean;
+    return { quality: quality, scaling: mean, variance: variance };
   }
 
   function parseDqt(d, o, len) {
@@ -246,10 +240,10 @@
         p += pq ? 2 : 1;
       }
       if (precision === 8) {
-        var qv = estimateQuality(vals);
-        var qlabel = qv != null ? "quality " + qv + "/100"
-          : (currentPhotoshopQuality != null ? "quality unknown (non-IJG) · Photoshop " + currentPhotoshopQuality + "/12"
-          : "quality unknown (non-IJG)");
+        var est = estimateQuality(vals, tq);
+        var qlabel = "Approx quality factor = " + est.quality.toFixed(2)
+          + " (scaling=" + est.scaling.toFixed(2) + " variance=" + est.variance.toFixed(2) + ")";
+        if (currentPhotoshopQuality != null) qlabel += " · Photoshop " + currentPhotoshopQuality + "/12";
         c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" + "  " + qlabel });
       } else {
         c.push({ n: "Quantization table " + tq + " (" + precision + "-bit)" });
