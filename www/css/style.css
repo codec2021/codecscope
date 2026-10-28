@@ -143,6 +143,22 @@ body { display: flex; flex-direction: column; }
 }
 .count { color: var(--text-dim); font-weight: 400; font-size: 12px; }
 
+.nal-filter {
+  margin-left: auto; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px;
+  font-size: 12px; max-width: 150px;
+}
+.syntax-search {
+  margin-left: 12px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px;
+  font-size: 12px; width: 160px;
+}
+.syntax-search:focus, .nal-filter:focus { outline: none; border-color: var(--accent); }
+
+/* 语法树搜索高亮 */
+.tree-row.match .label { background: #5a4a00; border-radius: 2px; }
+.tree-row.match-active .label { background: var(--accent); color: #fff; border-radius: 2px; }
+
 .tab-group { margin-left: auto; display: flex; gap: 2px; }
 .tab {
   background: var(--bg); color: var(--text); border: 1px solid var(--border);

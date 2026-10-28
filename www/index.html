@@ -17,6 +17,7 @@
       <span id="fileName" class="file-name">No file loaded</span>
       <button id="helpBtn" class="btn btn-secondary" title="Help & About">? Help</button>
       <button id="pluginBtn" class="btn btn-secondary" title="Load a SEI plugin (.js)">⚙ Plugin</button>
+      <button id="exportBtn" class="btn btn-secondary" title="Export analysis report">⬇ Export</button>
       <input type="file" id="pluginInput" hidden accept=".js">
       <span class="version-badge">v1.0.0</span>
       <button id="openBtn" class="btn">Open File</button>
@@ -39,7 +40,9 @@
 
   <main id="mainArea" class="main-area hidden">
     <section class="panel nal-panel">
-      <div class="panel-title">NAL Unit List <span id="nalCount" class="count"></span></div>
+      <div class="panel-title">NAL Unit List <span id="nalCount" class="count"></span>
+        <select id="nalFilter" class="nal-filter" title="Filter by NAL type"></select>
+      </div>
       <div id="nalScroll" class="nal-scroll">
         <div id="nalSpacer"></div>
         <div id="nalRows"></div>
@@ -58,6 +61,7 @@
     <section class="panel syntax-panel">
       <div class="panel-title">
         Syntax Elements <span id="syntaxTitle" class="count"></span>
+        <input id="syntaxSearch" class="syntax-search" type="text" placeholder="Search fields..." title="Search in syntax tree">
         <div class="tab-group">
           <button id="tabSyntax" class="tab active">Syntax</button>
           <button id="tabPreview" class="tab">Preview</button>

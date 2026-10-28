@@ -12,6 +12,8 @@
   var currentImageBlob = null;     // HEIC/HEIF 原始文件 Blob（用于原生解码预览）
   var currentHeicRawBytes = null;  // HEIC 原始字节（用于 libheif 解码）
   var selectedIndex = -1;
+  var nalFilter = -1;           // NAL 类型过滤：-1=全部，否则为 NAL type 值
+  var nalFiltered = [];         // 过滤后的 NAL 原始索引列表
 
   var statusEl = document.getElementById("status");
   var fileInput = document.getElementById("fileInput");
@@ -29,8 +31,11 @@
   var nalSpacer = document.getElementById("nalSpacer");
   var nalRows = document.getElementById("nalRows");
   var nalCount = document.getElementById("nalCount");
+  var nalFilterEl = document.getElementById("nalFilter");
   var syntaxTree = document.getElementById("syntaxTree");
   var syntaxTitle = document.getElementById("syntaxTitle");
+  var syntaxSearch = document.getElementById("syntaxSearch");
+  var exportBtn = document.getElementById("exportBtn");
   var mediaInfoView = document.getElementById("mediaInfoView");
   var hexView = document.getElementById("hexView");
   var bitrateView = document.getElementById("bitrateView");
@@ -332,10 +337,46 @@
   // 虚拟滚动 NAL 列表
   function renderNalTable() {
     var nalus = currentData.nalus;
-    nalCount.textContent = "(" + nalus.length + ")";
-    nalSpacer.style.height = (nalus.length * ROW_HEIGHT) + "px";
+    // 填充过滤下拉（去重、保持出现顺序）
+    var types = [], seen = {};
+    for (var i = 0; i < nalus.length; i++) {
+      var n = nalus[i];
+      if (!seen[n.type]) { seen[n.type] = true; types.push({ type: n.type, name: n.typeName }); }
+    }
+    types.sort(function (a, b) { return a.type - b.type; });
+    nalFilterEl.innerHTML = "";
+    var optAll = document.createElement("option");
+    optAll.value = "-1"; optAll.textContent = "All (" + nalus.length + ")";
+    nalFilterEl.appendChild(optAll);
+    var selectedFound = false;
+    for (var t = 0; t < types.length; t++) {
+      var opt = document.createElement("option");
+      opt.value = String(types[t].type);
+      opt.textContent = types[t].name + " (" + types[t].type + ")";
+      if (nalFilter === types[t].type) selectedFound = true;
+      nalFilterEl.appendChild(opt);
+    }
+    if (!selectedFound) nalFilter = -1;
+    nalFilterEl.value = String(nalFilter);
+    applyNalFilter();
+  }
+
+  function applyNalFilter() {
+    var nalus = currentData.nalus;
+    nalFiltered = [];
+    for (var i = 0; i < nalus.length; i++) {
+      if (nalFilter === -1 || nalus[i].type === nalFilter) nalFiltered.push(i);
+    }
+    nalCount.textContent = "(" + nalFiltered.length + "/" + nalus.length + ")";
+    nalSpacer.style.height = (nalFiltered.length * ROW_HEIGHT) + "px";
     selectedIndex = -1;
+    nalScroll.scrollTop = 0;
     updateVisibleRows();
+  }
+
+  function filteredPosOf(nalIndex) {
+    for (var i = 0; i < nalFiltered.length; i++) if (nalFiltered[i] === nalIndex) return i;
+    return -1;
   }
 
   // 一次遍历完成：收集 slice、按帧分组、标注每个 NAL 的 frameIdx
@@ -371,7 +412,8 @@
     return { slices: slices, frames: frames };
   }
 
-  function makeRow(i) {
+  function makeRow(pos) {
+    var i = nalFiltered[pos];
     var n = currentData.nalus[i];
     var row = document.createElement("div");
     row.className = "nal-row";
@@ -407,7 +449,7 @@
   }
 
   function updateVisibleRows() {
-    var total = currentData.nalus.length;
+    var total = nalFiltered.length;
     var scrollTop = nalScroll.scrollTop;
     var viewHeight = nalScroll.clientHeight;
     var start = Math.floor(scrollTop / ROW_HEIGHT);
@@ -419,7 +461,7 @@
     var frag = document.createDocumentFragment();
     for (var i = start; i < end; i++) {
       var row = makeRow(i);
-      if (i === selectedIndex) row.classList.add("selected");
+      if (nalFiltered[i] === selectedIndex) row.classList.add("selected");
       frag.appendChild(row);
     }
     nalRows.appendChild(frag);
@@ -429,6 +471,118 @@
   function renderSyntax(node) {
     syntaxTree.innerHTML = "";
     syntaxTree.appendChild(buildTree(node));
+    if (syntaxSearch && syntaxSearch.value) searchSyntaxTree(syntaxSearch.value);
+  }
+
+  // 在语法树里搜索字段，高亮匹配并展开祖先节点
+  function searchSyntaxTree(query) {
+    var q = (query || "").toLowerCase().trim();
+    var rows = syntaxTree.querySelectorAll(".tree-row");
+    for (var i = 0; i < rows.length; i++) rows[i].classList.remove("match", "match-active");
+    if (!q) return;
+    var matches = [];
+    for (var r = 0; r < rows.length; r++) {
+      var label = rows[r].querySelector(".label");
+      if (label && label.textContent.toLowerCase().indexOf(q) >= 0) {
+        matches.push(rows[r]);
+        rows[r].classList.add("match");
+      }
+    }
+    for (var m = 0; m < matches.length; m++) {
+      var p = matches[m].parentElement;
+      while (p && p !== syntaxTree) {
+        if (p.classList.contains("tree-children")) {
+          p.style.display = "block";
+          var sib = p.previousElementSibling;
+          if (sib && sib.classList.contains("tree-row")) {
+            var tg = sib.querySelector(".toggle");
+            if (tg) tg.textContent = "\u25bc";
+          }
+        }
+        p = p.parentElement;
+      }
+    }
+    if (matches.length > 0) {
+      matches[0].classList.add("match-active");
+      matches[0].scrollIntoView({ block: "center" });
+    }
+  }
+
+  // ---------- 导出报告 ----------
+  function dumpSyntaxText(node, lines, depth) {
+    if (!node) return;
+    var pad = "";
+    for (var d = 0; d < depth; d++) pad += "  ";
+    lines.push(pad + node.n);
+    if (node.c) for (var c = 0; c < node.c.length; c++) dumpSyntaxText(node.c[c], lines, depth + 1);
+  }
+
+  function buildReport() {
+    if (!currentData) return null;
+    var si = currentData.streamInfo;
+    var hdr = currentData.hdr || {};
+    var L = [];
+    L.push("# CodecScope Analysis Report");
+    L.push("");
+    L.push("## File");
+    L.push("- Name: " + fileNameEl.textContent);
+    L.push("- Codec: " + codecFullName() + " (" + currentCodec + ")");
+    L.push("- NAL units: " + si.nalus);
+    L.push("- Slices: " + si.slices);
+    L.push("- I/P/B: " + si.i + " / " + si.p + " / " + si.b);
+    L.push("- Profile: " + si.profile + "  Level: " + si.level);
+    var w = si.picWidth || hdr.picWidth;
+    var h = si.picHeight || hdr.picHeight;
+    if (w) L.push("- Resolution: " + w + " x " + h);
+    if (si.fps && parseFloat(si.fps) > 0) L.push("- FPS: " + si.fps);
+    if (si.bitDepth !== undefined) L.push("- Bit depth: " + si.bitDepth);
+    if (si.chromaFormat !== undefined) L.push("- Chroma: " + chromaFormatName(si.chromaFormat));
+    L.push("");
+
+    L.push("## NAL Type Distribution");
+    var dist = {};
+    for (var i = 0; i < currentData.nalus.length; i++) {
+      var tn = currentData.nalus[i].typeName;
+      dist[tn] = (dist[tn] || 0) + 1;
+    }
+    Object.keys(dist).sort().forEach(function (t) { L.push("- " + t + ": " + dist[t]); });
+    L.push("");
+
+    L.push("## NAL Unit List");
+    L.push("");
+    L.push("| # | Offset | Length | Type | Frame | Info |");
+    L.push("| --- | --- | --- | --- | --- | --- |");
+    for (var j = 0; j < currentData.nalus.length; j++) {
+      var n = currentData.nalus[j];
+      var info = (n.info || "").replace(/\|/g, "\\|");
+      var fr = (n.frameIdx !== undefined && n.frameIdx >= 0) ? String(n.frameIdx) : "";
+      L.push("| " + j + " | " + hex8(n.offset) + " | " + n.length + " | " + n.typeName + " | " + fr + " | " + info + " |");
+    }
+    L.push("");
+
+    if (selectedIndex >= 0 && selectedIndex < currentData.nalus.length) {
+      L.push("## Syntax Tree (NAL #" + selectedIndex + " " + currentData.nalus[selectedIndex].typeName + ")");
+      L.push("```");
+      var node = currentData.nalus[selectedIndex].jpegSyntax || fetchNalSyntax(selectedIndex);
+      dumpSyntaxText(node, L, 0);
+      L.push("```");
+    }
+    return L.join("\n");
+  }
+
+  function exportReport() {
+    var text = buildReport();
+    if (text == null) { setStatus("Nothing to export"); return; }
+    var base = (fileNameEl.textContent || "report").replace(/\s*\([\d.]+ MB\)$/, "").replace(/\.[^.]+$/, "");
+    var blob = new Blob([text], { type: "text/markdown" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = base + ".md";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
   function buildTree(node) {
@@ -1998,9 +2152,12 @@ timeline.addEventListener("click", function (e) {
     renderHex(index);
 
     if (scrollTo) {
-      var targetTop = index * ROW_HEIGHT;
-      nalScroll.scrollTop = targetTop - nalScroll.clientHeight / 2;
-      updateVisibleRows();
+      var pos = filteredPosOf(index);
+      if (pos >= 0) {
+        var targetTop = pos * ROW_HEIGHT;
+        nalScroll.scrollTop = targetTop - nalScroll.clientHeight / 2;
+        updateVisibleRows();
+      }
     }
   }
 
@@ -2024,6 +2181,14 @@ timeline.addEventListener("click", function (e) {
   });
 
   nalScroll.addEventListener("scroll", updateVisibleRows);
+
+  nalFilterEl.addEventListener("change", function () {
+    nalFilter = parseInt(nalFilterEl.value, 10);
+    if (!currentData) return;
+    applyNalFilter();
+  });
+
+  if (syntaxSearch) syntaxSearch.addEventListener("input", function () { searchSyntaxTree(syntaxSearch.value); });
 
   warningFilter.addEventListener("change", renderWarnings);
 
@@ -2406,6 +2571,7 @@ timeline.addEventListener("click", function (e) {
   }
 
   openBtn.addEventListener("click", function () { fileInput.click(); });
+  if (exportBtn) exportBtn.addEventListener("click", exportReport);
   fileInput.addEventListener("change", function () { handleFile(fileInput.files[0]); });
 
   // ---------- 插件加载 ----------
