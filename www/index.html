@@ -22,6 +22,8 @@
         <div id="pluginList" class="plugin-list"></div>
       </div>
       <button id="exportBtn" class="btn btn-secondary" title="Export analysis report">⬇ Export</button>
+      <button id="compareBtn" class="btn btn-secondary" title="Compare with another file">⇄ Compare</button>
+      <input type="file" id="compareInput" hidden accept="video/*,image/*,.h264,.h265,.hevc,.h266,.vvc,.266,.265,.264,.avc,.bin,.bit,.mp4,.m4v,.mov,.webm,.ts,.m2ts,.mts,.heic,.heif,.avif,.av1,.ivf,.obu,.png,.jpg,.jpeg,.gif,.webp,.bmp">
       <input type="file" id="pluginInput" hidden accept=".js">
       <span class="version-badge">v1.0.0</span>
       <button id="openBtn" class="btn">Open File</button>
@@ -167,6 +169,18 @@
           <li>Video decode: WebCodecs (H.264/H.265/VP9) + vvdec WASM (H.266) + dav1d WASM (AV1)</li>
           <li>Image decode: libheif WASM (HEIC) + dav1d WASM (AVIF) + browser-native (JPEG/PNG/…)</li>
         </ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="compareModal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <span>Compare Files</span>
+        <button id="compareClose" class="btn btn-secondary btn-small">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="compareBody"></div>
       </div>
     </div>
   </div>

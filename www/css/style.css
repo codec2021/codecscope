@@ -91,6 +91,13 @@ body { display: flex; flex-direction: column; }
 .plugin-item .p-del { cursor: pointer; color: #e05555; background: none; border: none; font-size: 14px; padding: 0 2px; }
 .plugin-empty { color: var(--text-dim); font-size: 12px; padding: 6px 4px; text-align: center; }
 
+/* 文件对比 */
+.compare-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.compare-table th, .compare-table td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; vertical-align: top; }
+.compare-table th { background: var(--bg-elevated); color: var(--text-dim); font-weight: 600; }
+.compare-table td.diff { color: #e05555; font-weight: 600; }
+.compare-table td.same { color: var(--text); }
+
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex;
   align-items: center; justify-content: center; z-index: 10000;
