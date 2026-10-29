@@ -852,6 +852,209 @@
     return { codec: videoCodec, annexb: annexb, description: null, nalLengthSize: 4 };
   }
 
+  // ---------- MPEG-TS PAT/PMT 结构解析（MediaInfo 风格） ----------
+  function tsStreamTypeInfo(streamType) {
+    switch (streamType) {
+      case 0x1B: return { handler: "vide", codec: "avc1", name: "H.264 / AVC" };
+      case 0x24: return { handler: "vide", codec: "hvc1", name: "H.265 / HEVC" };
+      case 0x02: return { handler: "vide", codec: "mp2v", name: "MPEG-2 Video" };
+      case 0x10: return { handler: "vide", codec: "mp4v", name: "MPEG-4 Video" };
+      case 0x0F: return { handler: "soun", codec: "mp4a", name: "AAC (ADTS)" };
+      case 0x11: return { handler: "soun", codec: "mp4a", name: "AAC (LATM)" };
+      case 0x03: return { handler: "soun", codec: "mp3", name: "MPEG-1 Audio" };
+      case 0x04: return { handler: "soun", codec: "mp3", name: "MPEG-2 Audio" };
+      case 0x81: return { handler: "soun", codec: "ac-3", name: "AC-3" };
+      case 0x87: return { handler: "soun", codec: "eac3", name: "E-AC-3" };
+      case 0x06: return { handler: "sub", codec: "priv", name: "Private (subtitles)" };
+      case 0x86: return { handler: "sub", codec: "dvbsub", name: "DVB Subtitle" };
+      default: return { handler: "data", codec: "0x" + streamType.toString(16), name: "Stream type 0x" + streamType.toString(16) };
+    }
+  }
+
+  function parseTsInfo(d) {
+    var info = { isContainer: true, format: "MPEG-TS", formatProfile: "MPEG Transport Stream" };
+    info.programs = [];
+    info.streams = [];
+    info.fileSize = d.length;
+
+    var pmtPid = -1;
+    var patPrograms = [];
+
+    // 第一遍：PAT（PID 0）
+    for (var pos = 0; pos + 188 <= d.length; pos += 188) {
+      if (d[pos] !== 0x47) continue;
+      var pid = ((d[pos + 1] & 0x1F) << 8) | d[pos + 2];
+      var afc = (d[pos + 3] >> 4) & 0x03;
+      var pusi = (d[pos + 1] >> 6) & 0x01;
+      if (!(afc & 0x01) || !pusi) continue;
+      var ps = pos + 4;
+      if (afc & 0x02) { var afl = d[ps]; ps += 1 + afl; if (ps >= pos + 188) continue; }
+      if (pid !== 0) continue;
+      var p = ps;
+      var ptr = d[p]; p++;
+      p += ptr;
+      if (d[p] !== 0x00) break; // 不是 PAT table
+      var sl = ((d[p + 1] & 0x0F) << 8) | d[p + 2];
+      var q = p + 8, qEnd = p + 3 + sl - 4;
+      while (q + 4 <= qEnd) {
+        var prog = (d[q] << 8) | d[q + 1];
+        var pPid = ((d[q + 2] & 0x1F) << 8) | d[q + 3];
+        patPrograms.push({ number: prog, pid: pPid });
+        if (prog !== 0) pmtPid = pPid;
+        q += 4;
+      }
+      break;
+    }
+    info.programs = patPrograms;
+
+    // 第二遍：PMT
+    if (pmtPid > 0) {
+      for (var pos2 = 0; pos2 + 188 <= d.length; pos2 += 188) {
+        if (d[pos2] !== 0x47) continue;
+        var pid2 = ((d[pos2 + 1] & 0x1F) << 8) | d[pos2 + 2];
+        if (pid2 !== pmtPid) continue;
+        var afc2 = (d[pos2 + 3] >> 4) & 0x03;
+        var pusi2 = (d[pos2 + 1] >> 6) & 0x01;
+        if (!(afc2 & 0x01) || !pusi2) continue;
+        var ps2 = pos2 + 4;
+        if (afc2 & 0x02) { var afl2 = d[ps2]; ps2 += 1 + afl2; if (ps2 >= pos2 + 188) continue; }
+        var p2 = ps2;
+        var ptr2 = d[p2]; p2++;
+        p2 += ptr2;
+        if (d[p2] !== 0x02) break; // 不是 PMT
+        var sl2 = ((d[p2 + 1] & 0x0F) << 8) | d[p2 + 2];
+        var pcrPid = ((d[p2 + 8] & 0x1F) << 8) | d[p2 + 9];
+        var pil = ((d[p2 + 10] & 0x0F) << 8) | d[p2 + 11];
+        var q2 = p2 + 12 + pil;
+        var q2End = p2 + 3 + sl2 - 4;
+        while (q2 + 5 <= q2End) {
+          var st = d[q2];
+          var esPid = ((d[q2 + 1] & 0x1F) << 8) | d[q2 + 2];
+          var eil = ((d[q2 + 3] & 0x0F) << 8) | d[q2 + 4];
+          var ti = tsStreamTypeInfo(st);
+          info.streams.push({ pid: esPid, streamType: st, handler: ti.handler, codec: ti.codec, name: ti.name });
+          q2 += 5 + eil;
+        }
+        break;
+      }
+    }
+
+    // 对齐 MediaInfo 的 tracks
+    info.tracks = info.streams.map(function (s) {
+      return { handler: s.handler, codec: s.codec, name: s.name, pid: s.pid, streamType: s.streamType };
+    });
+    return info;
+  }
+
+  // ---------- FLV ----------
+  function isFlv(d) {
+    return d.length >= 9 && d[0] === 0x46 && d[1] === 0x4C && d[2] === 0x56; // "FLV"
+  }
+
+  function demuxFlv(d) {
+    if (!isFlv(d)) return null;
+    var dataOffset = ((d[5] << 24) | (d[6] << 16) | (d[7] << 8) | d[8]) >>> 0;
+    var p = dataOffset;
+    var naluChunks = [];      // length-prefixed NAL 数据段
+    var description = null;   // avcC / hvcC
+    var videoCodec = null;
+    var nalLengthSize = 4;
+
+    while (p + 11 <= d.length) {
+      p += 4; // 跳过 PreviousTagSize
+      if (p + 11 > d.length) break;
+      var tagType = d[p];
+      var dataSize = (d[p + 1] << 16) | (d[p + 2] << 8) | d[p + 3];
+      var dataStart = p + 11;
+      var dataEnd = dataStart + dataSize;
+      if (dataEnd > d.length) break;
+
+      if (tagType === 9) { // video tag
+        var codecId = d[dataStart] & 0x0F;
+        if (codecId === 7 || codecId === 12) { // AVC / HEVC
+          videoCodec = codecId === 7 ? "avc" : "hevc";
+          var packetType = d[dataStart + 1];
+          var payload = d.subarray(dataStart + 5, dataEnd); // 跳过 frameInfo(1) + packetType(1) + compTime(3)
+          if (packetType === 0) {
+            description = payload;
+          } else if (packetType === 1) {
+            naluChunks.push(payload);
+          }
+        }
+      }
+      p = dataEnd;
+    }
+
+    if (!videoCodec || naluChunks.length === 0) return null;
+
+    // 从 avcC / hvcC 提取 SPS/PPS，保证解析器有参数集
+    var paramNals = [];
+    if (description && description.length >= 7) {
+      if (videoCodec === "avc") {
+        nalLengthSize = 1 + (description[4] & 0x03);
+        var spsLen = readU16(description, 6);
+        paramNals.push(description.subarray(8, 8 + spsLen));
+        var np = 8 + spsLen;
+        if (np < description.length) {
+          var numPps = description[np];
+          np += 1;
+          for (var q = 0; q < numPps && np + 2 <= description.length; q++) {
+            var ppsLen = readU16(description, np);
+            paramNals.push(description.subarray(np + 2, np + 2 + ppsLen));
+            np += 2 + ppsLen;
+          }
+        }
+      } else if (videoCodec === "hevc" && description.length >= 23) {
+        nalLengthSize = 1 + (description[21] & 0x03);
+        var na = description[22];
+        var np2 = 23;
+        for (var q2 = 0; q2 < na && np2 + 3 <= description.length; q2++) {
+          var ntype = description[np2] & 0x3F;
+          var numNalus = readU16(description, np2 + 1);
+          np2 += 3;
+          for (var q3 = 0; q3 < numNalus && np2 + 2 <= description.length; q3++) {
+            var nlen = readU16(description, np2);
+            if (ntype === 32 || ntype === 33 || ntype === 34)
+              paramNals.push(description.subarray(np2 + 2, np2 + 2 + nlen));
+            np2 += 2 + nlen;
+          }
+        }
+      }
+    }
+
+    // 转 Annex B：参数集 + length-prefixed NAL → start code 分隔
+    function toAnnexB(chunks, nls, params) {
+      var parts = [];
+      var total = 0;
+      function addNal(nal) {
+        var sc = new Uint8Array([0, 0, 0, 1]);
+        parts.push(sc);
+        parts.push(nal);
+        total += 4 + nal.length;
+      }
+      for (var pn = 0; pn < params.length; pn++) addNal(params[pn]);
+      for (var c = 0; c < chunks.length; c++) {
+        var data = chunks[c];
+        var q = 0;
+        while (q + nls <= data.length) {
+          var len = 0;
+          for (var i = 0; i < nls; i++) len = len * 256 + data[q + i];
+          q += nls;
+          if (len <= 0 || q + len > data.length) break;
+          addNal(data.subarray(q, q + len));
+          q += len;
+        }
+      }
+      var out = new Uint8Array(total);
+      var w = 0;
+      for (var k = 0; k < parts.length; k++) { out.set(parts[k], w); w += parts[k].length; }
+      return out;
+    }
+
+    var annexb = toAnnexB(naluChunks, nalLengthSize, paramNals);
+    return { codec: videoCodec, annexb: annexb, description: description, nalLengthSize: nalLengthSize };
+  }
+
   // ---------- WebM/Matroska (EBML) ----------
   function isWebm(d) { return d.length >= 4 && d[0] === 0x1A && d[1] === 0x45 && d[2] === 0xDF && d[3] === 0xA3; }
 
@@ -1630,6 +1833,9 @@
     demuxWebm: demuxWebm,
     isTs: isTs,
     demuxTs: demuxTs,
+    parseTsInfo: parseTsInfo,
+    isFlv: isFlv,
+    demuxFlv: demuxFlv,
     isAvif: isAvif,
     parseAvif: parseAvif
   };

@@ -283,11 +283,18 @@
 
     // ---- Audio ----
     var roots = [general, video];
+    if (ci && ci.streams && ci.streams.length) {
+      var sc = [{ n: "Programs: " + ci.programs.map(function (p) { return "#" + p.number + " (PMT PID " + p.pid + ")"; }).join(", ") }];
+      ci.streams.forEach(function (s) {
+        sc.push({ n: "PID " + s.pid + ": " + s.name + " (stream_type 0x" + s.streamType.toString(16) + ")" });
+      });
+      roots.push({ n: "TS Streams (PAT/PMT)", c: sc });
+    }
     if (ci && ci.isContainer) {
       var aTracks = ci.tracks.filter(function (t) { return t.handler === "soun"; });
       aTracks.forEach(function (at) {
         var ac = [
-          { n: "Format: PCM" },
+          { n: "Format: " + (at.name || "PCM") },
           { n: "Format settings: Big / Signed" },
           { n: "Codec ID: " + (at.codec || "twos") }
         ];
@@ -2470,9 +2477,21 @@ timeline.addEventListener("click", function (e) {
           fileBytes = ts.annexb;
           currentDescription = null;
           currentNalLengthSize = 4;
-          currentContainerInfo = null;
+          currentContainerInfo = H26xDemux.parseTsInfo ? H26xDemux.parseTsInfo(rawBytes) : null;
           hintCodec = ts.codec;
           srcNote = " (MPEG-TS demuxed)";
+        } else if (H26xDemux.isFlv(rawBytes)) {
+          var flv = H26xDemux.demuxFlv(rawBytes);
+          if (!flv || !flv.annexb || !flv.annexb.length) {
+            setStatus("FLV demux failed: no video track found");
+            return;
+          }
+          fileBytes = flv.annexb;
+          currentDescription = flv.description || null;
+          currentNalLengthSize = flv.nalLengthSize || 4;
+          currentContainerInfo = null;
+          hintCodec = flv.codec;
+          srcNote = " (FLV demuxed)";
         } else if (H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes) || H26xDemux.isWebm(rawBytes)) {
           var demuxedAv = H26xDemux.isWebm(rawBytes) ? H26xDemux.demuxWebm(rawBytes) : H26xDemux.parseIvf(rawBytes);
           if (!demuxedAv || !demuxedAv.frames || !demuxedAv.frames.length) {
