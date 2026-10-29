@@ -749,7 +749,310 @@ namespace AVC
       for(uint32_t i = 0; i < payloadSize; i++)
         msg.payload_data.push_back(bs.getBits(8));
 
+      if(payloadSize > 0)
+      {
+        BitstreamReader payloadBs(msg.payload_data.data(), msg.payload_data.size());
+        switch(payloadType)
+        {
+          case 5: // user_data_unregistered
+          {
+            std::shared_ptr<UserDataUnregistered> p(new UserDataUnregistered);
+            processUserDataUnregistered(p, payloadBs, payloadSize);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 6: // recovery_point
+          {
+            std::shared_ptr<RecoveryPoint> p(new RecoveryPoint);
+            processRecoveryPoint(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 23: // tone_mapping_info
+          {
+            std::shared_ptr<ToneMapping> p(new ToneMapping);
+            processToneMapping(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 45: // frame_packing_arrangement
+          {
+            std::shared_ptr<FramePacking> p(new FramePacking);
+            processFramePacking(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 47: // display_orientation
+          {
+            std::shared_ptr<DisplayOrientation> p(new DisplayOrientation);
+            processDisplayOrientation(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 132: // decoded_picture_hash
+          {
+            std::shared_ptr<DecodedPictureHash> p(new DecodedPictureHash);
+            processDecodedPictureHash(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 137: // mastering_display_colour_volume
+          {
+            std::shared_ptr<MasteringDisplayInfo> p(new MasteringDisplayInfo);
+            processMasteringDisplayInfo(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 140: // chroma_resampling_filter_hint
+          {
+            std::shared_ptr<ChromaResamplingFilterHint> p(new ChromaResamplingFilterHint);
+            processChromaResamplingFilterHint(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 141: // knee_function_info
+          {
+            std::shared_ptr<KneeFunctionInfo> p(new KneeFunctionInfo);
+            processKneeFunctionInfo(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 144: // content_light_level_info
+          {
+            std::shared_ptr<ContentLightLevelInfo> p(new ContentLightLevelInfo);
+            processContentLightLevelInfo(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+          case 147: // alternative_transfer_characteristics
+          {
+            std::shared_ptr<AlternativeTransferCharacteristics> p(new AlternativeTransferCharacteristics);
+            processAlternativeTransferCharacteristics(p, payloadBs);
+            msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(p);
+            break;
+          }
+        }
+      }
+
       pnal->messages.push_back(msg);
+    }
+  }
+
+  void AvcParserImpl::processUserDataUnregistered(std::shared_ptr<UserDataUnregistered> p, BitstreamReader &bs, std::size_t payloadSize)
+  {
+    if(payloadSize < 16)
+      return;
+    for(std::size_t i = 0; i < 16; i++)
+      p->uuid_iso_iec_11578[i] = bs.getBits(8);
+    p->user_data_payload_byte.resize(payloadSize - 16);
+    for(std::size_t i = 16; i < payloadSize; i++)
+      p->user_data_payload_byte[i - 16] = bs.getBits(8);
+  }
+
+  void AvcParserImpl::processRecoveryPoint(std::shared_ptr<RecoveryPoint> p, BitstreamReader &bs)
+  {
+    p->recovery_poc_cnt = bs.getGolombS();
+    p->exact_match_flag = bs.getBits(1);
+    p->broken_link_flag = bs.getBits(1);
+  }
+
+  void AvcParserImpl::processFramePacking(std::shared_ptr<FramePacking> p, BitstreamReader &bs)
+  {
+    p->frame_packing_arrangement_id = bs.getGolombU();
+    p->frame_packing_arrangement_cancel_flag = bs.getBits(1);
+    if(!p->frame_packing_arrangement_cancel_flag)
+    {
+      p->frame_packing_arrangement_type = bs.getBits(7);
+      p->quincunx_sampling_flag = bs.getBits(1);
+      p->content_interpretation_type = bs.getBits(6);
+      p->spatial_flipping_flag = bs.getBits(1);
+      p->frame0_flipped_flag = bs.getBits(1);
+      p->field_views_flag = bs.getBits(1);
+      p->current_frame_is_frame0_flag = bs.getBits(1);
+      p->frame0_self_contained_flag = bs.getBits(1);
+      p->frame1_self_contained_flag = bs.getBits(1);
+      if(!p->quincunx_sampling_flag && p->frame_packing_arrangement_type != 5)
+      {
+        p->frame0_grid_position_x = bs.getBits(4);
+        p->frame0_grid_position_y = bs.getBits(4);
+        p->frame1_grid_position_x = bs.getBits(4);
+        p->frame1_grid_position_y = bs.getBits(4);
+      }
+      p->frame_packing_arrangement_reserved_byte = bs.getBits(8);
+      p->frame_packing_arrangement_persistence_flag = bs.getBits(1);
+    }
+    p->upsampled_aspect_ratio_flag = bs.getBits(1);
+  }
+
+  void AvcParserImpl::processDisplayOrientation(std::shared_ptr<DisplayOrientation> p, BitstreamReader &bs)
+  {
+    p->display_orientation_cancel_flag = bs.getBits(1);
+    if(!p->display_orientation_cancel_flag)
+    {
+      p->hor_flip = bs.getBits(1);
+      p->ver_flip = bs.getBits(1);
+      p->anticlockwise_rotation = bs.getBits(16);
+      p->display_orientation_persistence_flag = bs.getBits(1);
+    }
+  }
+
+  void AvcParserImpl::processMasteringDisplayInfo(std::shared_ptr<MasteringDisplayInfo> p, BitstreamReader &bs)
+  {
+    for(uint32_t i = 0; i < 3; i++)
+    {
+      p->display_primary_x[i] = bs.getBits(16);
+      p->display_primary_y[i] = bs.getBits(16);
+    }
+    p->white_point_x = bs.getBits(16);
+    p->white_point_y = bs.getBits(16);
+    p->max_display_mastering_luminance = bs.getBits(32);
+    p->min_display_mastering_luminance = bs.getBits(32);
+  }
+
+  void AvcParserImpl::processContentLightLevelInfo(std::shared_ptr<ContentLightLevelInfo> p, BitstreamReader &bs)
+  {
+    p->max_content_light_level = bs.getBits(16);
+    p->max_pic_average_light_level = bs.getBits(16);
+  }
+
+  void AvcParserImpl::processAlternativeTransferCharacteristics(std::shared_ptr<AlternativeTransferCharacteristics> p, BitstreamReader &bs)
+  {
+    p->alternative_transfer_characteristics = bs.getBits(8);
+  }
+
+  void AvcParserImpl::processKneeFunctionInfo(std::shared_ptr<KneeFunctionInfo> p, BitstreamReader &bs)
+  {
+    p->knee_function_id = bs.getGolombU();
+    p->knee_function_cancel_flag = bs.getBits(1);
+    if(!p->knee_function_cancel_flag)
+    {
+      p->knee_function_persistence_flag = bs.getBits(1);
+      p->input_d_range = bs.getBits(32);
+      p->input_disp_luminance = bs.getBits(32);
+      p->output_d_range = bs.getBits(32);
+      p->output_disp_luminance = bs.getBits(32);
+      p->num_knee_points_minus1 = bs.getGolombU();
+      p->input_knee_point.resize(p->num_knee_points_minus1 + 1);
+      p->output_knee_point.resize(p->num_knee_points_minus1 + 1);
+      for(std::size_t i = 0; i <= p->num_knee_points_minus1; i++)
+      {
+        p->input_knee_point[i] = bs.getBits(10);
+        p->output_knee_point[i] = bs.getBits(10);
+      }
+    }
+  }
+
+  void AvcParserImpl::processChromaResamplingFilterHint(std::shared_ptr<ChromaResamplingFilterHint> p, BitstreamReader &bs)
+  {
+    p->ver_chroma_filter_idc = bs.getBits(8);
+    p->hor_chroma_filter_idc = bs.getBits(8);
+    p->ver_filtering_field_processing_flag = bs.getBits(1);
+    if(p->ver_chroma_filter_idc == 1 || p->hor_chroma_filter_idc == 1)
+    {
+      p->target_format_idc = bs.getGolombU();
+      if(p->ver_chroma_filter_idc == 1)
+      {
+        p->num_vertical_filters = bs.getGolombU();
+        p->ver_tap_length_minus_1.resize(p->num_vertical_filters);
+        p->ver_filter_coeff.resize(p->num_vertical_filters);
+        for(std::size_t i = 0; i < p->num_vertical_filters; i++)
+        {
+          p->ver_tap_length_minus_1[i] = bs.getGolombU();
+          p->ver_filter_coeff[i].resize(p->ver_tap_length_minus_1[i] + 1);
+          for(std::size_t j = 0; j <= p->ver_tap_length_minus_1[i]; j++)
+            p->ver_filter_coeff[i][j] = bs.getGolombS();
+        }
+      }
+      if(p->hor_chroma_filter_idc == 1)
+      {
+        p->num_horizontal_filters = bs.getGolombU();
+        p->hor_tap_length_minus_1.resize(p->num_horizontal_filters);
+        p->hor_filter_coeff.resize(p->num_horizontal_filters);
+        for(std::size_t i = 0; i < p->num_horizontal_filters; i++)
+        {
+          p->hor_tap_length_minus_1[i] = bs.getGolombU();
+          p->hor_filter_coeff[i].resize(p->hor_tap_length_minus_1[i] + 1);
+          for(std::size_t j = 0; j <= p->hor_tap_length_minus_1[i]; j++)
+            p->hor_filter_coeff[i][j] = bs.getGolombS();
+        }
+      }
+    }
+  }
+
+  void AvcParserImpl::processDecodedPictureHash(std::shared_ptr<DecodedPictureHash> p, BitstreamReader &bs)
+  {
+    p->hash_type = bs.getBits(8);
+    std::size_t cnt = 3;
+    if(p->hash_type == 0)
+      p->picture_md5.resize(cnt);
+    else if(p->hash_type == 1)
+      p->picture_crc.resize(cnt);
+    else if(p->hash_type == 2)
+      p->picture_checksum.resize(cnt);
+    for(std::size_t i = 0; i < cnt; i++)
+    {
+      if(p->hash_type == 0)
+        for(std::size_t j = 0; j < 16; j++)
+          p->picture_md5[i][j] = bs.getBits(8);
+      else if(p->hash_type == 1)
+        p->picture_crc[i] = bs.getBits(16);
+      else if(p->hash_type == 2)
+        p->picture_checksum[i] = bs.getBits(32);
+    }
+  }
+
+  void AvcParserImpl::processToneMapping(std::shared_ptr<ToneMapping> p, BitstreamReader &bs)
+  {
+    p->tone_map_id = bs.getGolombU();
+    p->tone_map_cancel_flag = bs.getBits(1);
+    if(!p->tone_map_cancel_flag)
+    {
+      p->tone_map_persistence_flag = bs.getBits(1);
+      p->coded_data_bit_depth = bs.getBits(8);
+      p->target_bit_depth = bs.getBits(8);
+      p->tone_map_model_id = bs.getGolombU();
+      if(p->tone_map_model_id == 0)
+      {
+        p->min_value = bs.getBits(32);
+        p->max_value = bs.getBits(32);
+      }
+      else if(p->tone_map_model_id == 1)
+      {
+        p->sigmoid_midpoint = bs.getBits(32);
+        p->sigmoid_width = bs.getBits(32);
+      }
+      else if(p->tone_map_model_id == 2)
+      {
+        std::size_t start_of_coded_interval_length = ((p->coded_data_bit_depth + 7) >> 3) << 3;
+        p->start_of_coded_interval.resize(1 << p->target_bit_depth);
+        for(std::size_t i = 0; i < (1u << p->target_bit_depth); i++)
+          p->start_of_coded_interval[i] = bs.getBits(start_of_coded_interval_length);
+      }
+      else if(p->tone_map_model_id == 3)
+      {
+        p->num_pivots = bs.getBits(16);
+        p->coded_pivot_value.resize(p->num_pivots);
+        p->target_pivot_value.resize(p->num_pivots);
+        for(std::size_t i = 0; i < p->num_pivots; i++)
+        {
+          p->coded_pivot_value[i] = bs.getBits(p->coded_data_bit_depth);
+          p->target_pivot_value[i] = bs.getBits(p->target_bit_depth);
+        }
+        p->camera_iso_speed_idc = bs.getBits(8);
+        if(p->camera_iso_speed_idc == 255)
+          p->camera_iso_speed_value = bs.getBits(32);
+        p->exposure_index_idc = bs.getBits(8);
+        if(p->exposure_index_idc == 255)
+          p->exposure_index_value = bs.getBits(32);
+        p->exposure_compensation_value_sign_flag = bs.getBits(1);
+        p->exposure_compensation_value_numerator = bs.getBits(16);
+        p->exposure_compensation_value_denom_idc = bs.getBits(16);
+        p->ref_screen_luminance_white = bs.getBits(32);
+        p->extended_range_white_level = bs.getBits(32);
+        p->nominal_black_level_code_value = bs.getBits(16);
+        p->nominal_white_level_code_value = bs.getBits(16);
+        p->extended_white_level_code_value = bs.getBits(16);
+      }
     }
   }
 

@@ -11,6 +11,27 @@ namespace web
     std::string n(uint16_t v) { return std::to_string(v); }
     std::string n(std::size_t v) { return std::to_string(v); }
 
+    std::string hex2Upper(uint8_t v)
+    {
+      static const char *h = "0123456789ABCDEF";
+      std::string r = "00";
+      r[0] = h[(v >> 4) & 0xF];
+      r[1] = h[v & 0xF];
+      return r;
+    }
+
+    std::string uuidFormat(const uint8_t *p)
+    {
+      std::string r;
+      for(int i = 0; i < 16; i++)
+      {
+        if(i == 4 || i == 6 || i == 8 || i == 10)
+          r += "-";
+        r += hex2Upper(p[i]);
+      }
+      return r;
+    }
+
     uint32_t sliceTypeNorm(uint32_t st) { return st % 5; }
   }
 
@@ -534,16 +555,334 @@ namespace web
       SyntaxNode &c = p.add("sei_message(" + n(i) + ")");
       c.add("payload_type = " + n(m.payload_type));
       c.add("payload_size = " + n(m.payload_size));
-      std::string str = "payload_data = { ";
-      for(std::size_t j = 0; j < m.payload_data.size() && j < 64; j++)
+
+      switch(m.payload_type)
       {
-        if(j) str += ", ";
-        str += n(m.payload_data[j]);
+        case 5:
+        {
+          std::shared_ptr<AVC::UserDataUnregistered> pl = std::dynamic_pointer_cast<AVC::UserDataUnregistered>(m.sei_payload);
+          SyntaxNode &cc = c.add("user_data_unregistered(" + n(m.payload_size) + ")");
+          createUserDataUnregistered(pl, cc);
+          break;
+        }
+        case 6:
+        {
+          std::shared_ptr<AVC::RecoveryPoint> pl = std::dynamic_pointer_cast<AVC::RecoveryPoint>(m.sei_payload);
+          SyntaxNode &cc = c.add("recovery_point(" + n(m.payload_size) + ")");
+          createRecoveryPoint(pl, cc);
+          break;
+        }
+        case 23:
+        {
+          std::shared_ptr<AVC::ToneMapping> pl = std::dynamic_pointer_cast<AVC::ToneMapping>(m.sei_payload);
+          SyntaxNode &cc = c.add("tone_mapping_info(" + n(m.payload_size) + ")");
+          createToneMapping(pl, cc);
+          break;
+        }
+        case 45:
+        {
+          std::shared_ptr<AVC::FramePacking> pl = std::dynamic_pointer_cast<AVC::FramePacking>(m.sei_payload);
+          SyntaxNode &cc = c.add("frame_packing_arrangement(" + n(m.payload_size) + ")");
+          createFramePacking(pl, cc);
+          break;
+        }
+        case 47:
+        {
+          std::shared_ptr<AVC::DisplayOrientation> pl = std::dynamic_pointer_cast<AVC::DisplayOrientation>(m.sei_payload);
+          SyntaxNode &cc = c.add("display_orientation(" + n(m.payload_size) + ")");
+          createDisplayOrientation(pl, cc);
+          break;
+        }
+        case 132:
+        {
+          std::shared_ptr<AVC::DecodedPictureHash> pl = std::dynamic_pointer_cast<AVC::DecodedPictureHash>(m.sei_payload);
+          SyntaxNode &cc = c.add("decoded_picture_hash(" + n(m.payload_size) + ")");
+          createDecodedPictureHash(pl, cc);
+          break;
+        }
+        case 137:
+        {
+          std::shared_ptr<AVC::MasteringDisplayInfo> pl = std::dynamic_pointer_cast<AVC::MasteringDisplayInfo>(m.sei_payload);
+          SyntaxNode &cc = c.add("mastering_display_info(" + n(m.payload_size) + ")");
+          createMasteringDisplayInfo(pl, cc);
+          break;
+        }
+        case 140:
+        {
+          std::shared_ptr<AVC::ChromaResamplingFilterHint> pl = std::dynamic_pointer_cast<AVC::ChromaResamplingFilterHint>(m.sei_payload);
+          SyntaxNode &cc = c.add("chroma_resampling_filter_hint(" + n(m.payload_size) + ")");
+          createChromaResamplingFilterHint(pl, cc);
+          break;
+        }
+        case 141:
+        {
+          std::shared_ptr<AVC::KneeFunctionInfo> pl = std::dynamic_pointer_cast<AVC::KneeFunctionInfo>(m.sei_payload);
+          SyntaxNode &cc = c.add("knee_function_info(" + n(m.payload_size) + ")");
+          createKneeFunctionInfo(pl, cc);
+          break;
+        }
+        case 144:
+        {
+          std::shared_ptr<AVC::ContentLightLevelInfo> pl = std::dynamic_pointer_cast<AVC::ContentLightLevelInfo>(m.sei_payload);
+          SyntaxNode &cc = c.add("content_light_level_info(" + n(m.payload_size) + ")");
+          createContentLightLevelInfo(pl, cc);
+          break;
+        }
+        case 147:
+        {
+          std::shared_ptr<AVC::AlternativeTransferCharacteristics> pl = std::dynamic_pointer_cast<AVC::AlternativeTransferCharacteristics>(m.sei_payload);
+          SyntaxNode &cc = c.add("alternative_transfer_characteristics(" + n(m.payload_size) + ")");
+          createAlternativeTransferCharacteristics(pl, cc);
+          break;
+        }
+        default:
+        {
+          std::string str = "payload_data = { ";
+          for(std::size_t j = 0; j < m.payload_data.size() && j < 64; j++)
+          {
+            if(j) str += ", ";
+            str += n(m.payload_data[j]);
+          }
+          if(m.payload_data.size() > 64)
+            str += ", ... (" + n((uint32_t)m.payload_data.size()) + " bytes)";
+          str += " }";
+          c.add(str);
+        }
       }
-      if(m.payload_data.size() > 64)
-        str += ", ... (" + n((uint32_t)m.payload_data.size()) + " bytes)";
-      str += " }";
-      c.add(str);
+    }
+  }
+
+  void AvcSyntaxWriter::createUserDataUnregistered(std::shared_ptr<AVC::UserDataUnregistered> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("uuid_iso_iec_11578 = " + uuidFormat(pl->uuid_iso_iec_11578));
+    std::string str = "user_data_payload_byte = { ";
+    for(std::size_t i = 0; i < pl->user_data_payload_byte.size(); i++)
+    {
+      if(i) str += ", ";
+      str += n(pl->user_data_payload_byte[i]);
+    }
+    str += " }";
+    parent.add(str);
+  }
+
+  void AvcSyntaxWriter::createRecoveryPoint(std::shared_ptr<AVC::RecoveryPoint> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("recovery_poc_cnt = " + n(pl->recovery_poc_cnt));
+    parent.add("exact_match_flag = " + n(pl->exact_match_flag));
+    parent.add("broken_link_flag = " + n(pl->broken_link_flag));
+  }
+
+  void AvcSyntaxWriter::createFramePacking(std::shared_ptr<AVC::FramePacking> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("frame_packing_arrangement_id = " + n(pl->frame_packing_arrangement_id));
+    parent.add("frame_packing_arrangement_cancel_flag = " + n(pl->frame_packing_arrangement_cancel_flag));
+    if(!pl->frame_packing_arrangement_cancel_flag)
+    {
+      SyntaxNode &pi = parent.add("if( !frame_packing_arrangement_cancel_flag )");
+      pi.add("frame_packing_arrangement_type = " + n(pl->frame_packing_arrangement_type));
+      pi.add("quincunx_sampling_flag = " + n(pl->quincunx_sampling_flag));
+      pi.add("content_interpretation_type = " + n(pl->content_interpretation_type));
+      pi.add("spatial_flipping_flag = " + n(pl->spatial_flipping_flag));
+      pi.add("frame0_flipped_flag = " + n(pl->frame0_flipped_flag));
+      pi.add("field_views_flag = " + n(pl->field_views_flag));
+      pi.add("current_frame_is_frame0_flag = " + n(pl->current_frame_is_frame0_flag));
+      pi.add("frame0_self_contained_flag = " + n(pl->frame0_self_contained_flag));
+      pi.add("frame1_self_contained_flag = " + n(pl->frame1_self_contained_flag));
+      if(!pl->quincunx_sampling_flag && pl->frame_packing_arrangement_type != 5)
+      {
+        SyntaxNode &pg = pi.add("if( !quincunx_sampling_flag && frame_packing_arrangement_type != 5 )");
+        pg.add("frame0_grid_position_x = " + n(pl->frame0_grid_position_x));
+        pg.add("frame0_grid_position_y = " + n(pl->frame0_grid_position_y));
+        pg.add("frame1_grid_position_x = " + n(pl->frame1_grid_position_x));
+        pg.add("frame1_grid_position_y = " + n(pl->frame1_grid_position_y));
+      }
+      pi.add("frame_packing_arrangement_reserved_byte = " + n(pl->frame_packing_arrangement_reserved_byte));
+      pi.add("frame_packing_arrangement_persistence_flag = " + n(pl->frame_packing_arrangement_persistence_flag));
+    }
+    parent.add("upsampled_aspect_ratio_flag = " + n(pl->upsampled_aspect_ratio_flag));
+  }
+
+  void AvcSyntaxWriter::createDisplayOrientation(std::shared_ptr<AVC::DisplayOrientation> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("display_orientation_cancel_flag = " + n(pl->display_orientation_cancel_flag));
+    if(!pl->display_orientation_cancel_flag)
+    {
+      SyntaxNode &pi = parent.add("if( !display_orientation_cancel_flag )");
+      pi.add("hor_flip = " + n(pl->hor_flip));
+      pi.add("ver_flip = " + n(pl->ver_flip));
+      pi.add("anticlockwise_rotation = " + n(pl->anticlockwise_rotation));
+      pi.add("display_orientation_persistence_flag = " + n(pl->display_orientation_persistence_flag));
+    }
+  }
+
+  void AvcSyntaxWriter::createMasteringDisplayInfo(std::shared_ptr<AVC::MasteringDisplayInfo> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    SyntaxNode &loop = parent.add("for( i = 0; i < 3; i++ )");
+    for(uint32_t i = 0; i < 3; i++)
+    {
+      loop.add("display_primary_x[" + n(i) + "] = " + n(pl->display_primary_x[i]));
+      loop.add("display_primary_y[" + n(i) + "] = " + n(pl->display_primary_y[i]));
+    }
+    parent.add("white_point_x = " + n(pl->white_point_x));
+    parent.add("white_point_y = " + n(pl->white_point_y));
+    parent.add("max_display_mastering_luminance = " + n(pl->max_display_mastering_luminance));
+    parent.add("min_display_mastering_luminance = " + n(pl->min_display_mastering_luminance));
+  }
+
+  void AvcSyntaxWriter::createContentLightLevelInfo(std::shared_ptr<AVC::ContentLightLevelInfo> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("max_content_light_level = " + n(pl->max_content_light_level));
+    parent.add("max_pic_average_light_level = " + n(pl->max_pic_average_light_level));
+  }
+
+  void AvcSyntaxWriter::createAlternativeTransferCharacteristics(std::shared_ptr<AVC::AlternativeTransferCharacteristics> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("alternative_transfer_characteristics = " + n(pl->alternative_transfer_characteristics));
+  }
+
+  void AvcSyntaxWriter::createKneeFunctionInfo(std::shared_ptr<AVC::KneeFunctionInfo> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("knee_function_id = " + n(pl->knee_function_id));
+    parent.add("knee_function_cancel_flag = " + n(pl->knee_function_cancel_flag));
+    if(!pl->knee_function_cancel_flag)
+    {
+      SyntaxNode &pi = parent.add("if( !knee_function_cancel_flag )");
+      pi.add("knee_function_persistence_flag = " + n(pl->knee_function_persistence_flag));
+      pi.add("input_d_range = " + n(pl->input_d_range));
+      pi.add("input_disp_luminance = " + n(pl->input_disp_luminance));
+      pi.add("output_d_range = " + n(pl->output_d_range));
+      pi.add("output_disp_luminance = " + n(pl->output_disp_luminance));
+      pi.add("num_knee_points_minus1 = " + n(pl->num_knee_points_minus1));
+      SyntaxNode &loop = pi.add("for( i = 0; i <= num_knee_points_minus1; i++ )");
+      for(std::size_t i = 0; i <= pl->num_knee_points_minus1; i++)
+      {
+        loop.add("input_knee_point[" + n(i) + "] = " + n(pl->input_knee_point[i]));
+        loop.add("output_knee_point[" + n(i) + "] = " + n(pl->output_knee_point[i]));
+      }
+    }
+  }
+
+  void AvcSyntaxWriter::createChromaResamplingFilterHint(std::shared_ptr<AVC::ChromaResamplingFilterHint> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("ver_chroma_filter_idc = " + n(pl->ver_chroma_filter_idc));
+    parent.add("hor_chroma_filter_idc = " + n(pl->hor_chroma_filter_idc));
+    parent.add("ver_filtering_field_processing_flag = " + n(pl->ver_filtering_field_processing_flag));
+    if(pl->ver_chroma_filter_idc == 1 || pl->hor_chroma_filter_idc == 1)
+    {
+      SyntaxNode &pi = parent.add("if( ver_chroma_filter_idc == 1 || hor_chroma_filter_idc == 1 )");
+      pi.add("target_format_idc = " + n(pl->target_format_idc));
+      if(pl->ver_chroma_filter_idc == 1)
+      {
+        SyntaxNode &pv = pi.add("if( ver_chroma_filter_idc == 1 )");
+        pv.add("num_vertical_filters = " + n(pl->num_vertical_filters));
+        for(std::size_t i = 0; i < pl->num_vertical_filters; i++)
+        {
+          pv.add("ver_tap_length_minus_1[" + n(i) + "] = " + n(pl->ver_tap_length_minus_1[i]));
+          std::string str = "ver_filter_coeff[" + n(i) + "] = { ";
+          for(std::size_t j = 0; j < pl->ver_tap_length_minus_1[i]; j++)
+          {
+            if(j) str += ", ";
+            str += n(pl->ver_filter_coeff[i][j]);
+          }
+          str += " }";
+          pv.add(str);
+        }
+      }
+      if(pl->hor_chroma_filter_idc == 1)
+      {
+        SyntaxNode &ph = pi.add("if( hor_chroma_filter_idc == 1 )");
+        ph.add("num_horizontal_filters = " + n(pl->num_horizontal_filters));
+        for(std::size_t i = 0; i < pl->num_horizontal_filters; i++)
+        {
+          ph.add("hor_tap_length_minus_1[" + n(i) + "] = " + n(pl->hor_tap_length_minus_1[i]));
+          std::string str = "hor_filter_coeff[" + n(i) + "] = { ";
+          for(std::size_t j = 0; j < pl->hor_tap_length_minus_1[i]; j++)
+          {
+            if(j) str += ", ";
+            str += n(pl->hor_filter_coeff[i][j]);
+          }
+          str += " }";
+          ph.add(str);
+        }
+      }
+    }
+  }
+
+  void AvcSyntaxWriter::createDecodedPictureHash(std::shared_ptr<AVC::DecodedPictureHash> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("hash_type = " + n(pl->hash_type));
+    if(pl->hash_type == 0)
+    {
+      for(std::size_t i = 0; i < pl->picture_md5.size(); i++)
+      {
+        std::string str;
+        for(std::size_t j = 0; j < 16; j++)
+          str += hex2Upper(pl->picture_md5[i][j]);
+        parent.add("picture_md5[" + n(i) + "] = " + str);
+      }
+    }
+    else if(pl->hash_type == 1)
+    {
+      for(std::size_t i = 0; i < pl->picture_crc.size(); i++)
+        parent.add("picture_crc[" + n(i) + "] = " + n(pl->picture_crc[i]));
+    }
+    else if(pl->hash_type == 2)
+    {
+      for(std::size_t i = 0; i < pl->picture_checksum.size(); i++)
+        parent.add("picture_checksum[" + n(i) + "] = " + n(pl->picture_checksum[i]));
+    }
+  }
+
+  void AvcSyntaxWriter::createToneMapping(std::shared_ptr<AVC::ToneMapping> pl, SyntaxNode &parent)
+  {
+    if(!pl) return;
+    parent.add("tone_map_id = " + n(pl->tone_map_id));
+    parent.add("tone_map_cancel_flag = " + n(pl->tone_map_cancel_flag));
+    if(!pl->tone_map_cancel_flag)
+    {
+      SyntaxNode &pi = parent.add("if( !tone_map_cancel_flag )");
+      pi.add("tone_map_persistence_flag = " + n(pl->tone_map_persistence_flag));
+      pi.add("coded_data_bit_depth = " + n(pl->coded_data_bit_depth));
+      pi.add("target_bit_depth = " + n(pl->target_bit_depth));
+      pi.add("tone_map_model_id = " + n(pl->tone_map_model_id));
+      if(pl->tone_map_model_id == 0)
+      {
+        SyntaxNode &pm = pi.add("if( tone_map_model_id == 0 )");
+        pm.add("min_value = " + n(pl->min_value));
+        pm.add("max_value = " + n(pl->max_value));
+      }
+      else if(pl->tone_map_model_id == 1)
+      {
+        SyntaxNode &pm = pi.add("if( tone_map_model_id == 1 )");
+        pm.add("sigmoid_midpoint = " + n(pl->sigmoid_midpoint));
+        pm.add("sigmoid_width = " + n(pl->sigmoid_width));
+      }
+      else if(pl->tone_map_model_id == 2)
+      {
+        SyntaxNode &pm = pi.add("if( tone_map_model_id == 2 )");
+        for(std::size_t i = 0; i < pl->start_of_coded_interval.size(); i++)
+          pm.add("start_of_coded_interval[" + n(i) + "] = " + n(pl->start_of_coded_interval[i]));
+      }
+      else if(pl->tone_map_model_id == 3)
+      {
+        SyntaxNode &pm = pi.add("if( tone_map_model_id == 3 )");
+        pm.add("num_pivots = " + n(pl->num_pivots));
+        for(std::size_t i = 0; i < pl->num_pivots; i++)
+        {
+          pm.add("coded_pivot_value[" + n(i) + "] = " + n(pl->coded_pivot_value[i]));
+          pm.add("target_pivot_value[" + n(i) + "] = " + n(pl->target_pivot_value[i]));
+        }
+      }
     }
   }
 

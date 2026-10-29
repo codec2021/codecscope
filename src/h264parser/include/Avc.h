@@ -298,12 +298,19 @@ namespace AVC
     void toDefault();
   };
 
+  class SeiPayload
+  {
+  public:
+    virtual ~SeiPayload() {};
+  };
+
   class SeiMessage
   {
   public:
     uint32_t payload_type;
     uint32_t payload_size;
     std::vector<uint8_t> payload_data;
+    std::shared_ptr<SeiPayload> sei_payload;
 
     void toDefault();
   };
@@ -313,6 +320,148 @@ namespace AVC
   public:
     SEI_NAL(NALHeader header);
     std::vector<SeiMessage> messages;
+  };
+
+  class UserDataUnregistered: public SeiPayload
+  {
+  public:
+    uint8_t uuid_iso_iec_11578[16];
+    std::vector<uint8_t> user_data_payload_byte;
+  };
+
+  class RecoveryPoint: public SeiPayload
+  {
+  public:
+    int32_t recovery_poc_cnt;
+    uint8_t exact_match_flag;
+    uint8_t broken_link_flag;
+  };
+
+  class FramePacking: public SeiPayload
+  {
+  public:
+    uint32_t frame_packing_arrangement_id;
+    uint8_t  frame_packing_arrangement_cancel_flag;
+    uint8_t  frame_packing_arrangement_type;
+    uint8_t  quincunx_sampling_flag;
+    uint8_t  content_interpretation_type;
+    uint8_t  spatial_flipping_flag;
+    uint8_t  frame0_flipped_flag;
+    uint8_t  field_views_flag;
+    uint8_t  current_frame_is_frame0_flag;
+    uint8_t  frame0_self_contained_flag;
+    uint8_t  frame1_self_contained_flag;
+    uint8_t  frame0_grid_position_x;
+    uint8_t  frame0_grid_position_y;
+    uint8_t  frame1_grid_position_x;
+    uint8_t  frame1_grid_position_y;
+    uint8_t  frame_packing_arrangement_reserved_byte;
+    uint8_t  frame_packing_arrangement_persistence_flag;
+    uint8_t  upsampled_aspect_ratio_flag;
+  };
+
+  class DisplayOrientation: public SeiPayload
+  {
+  public:
+    uint8_t  display_orientation_cancel_flag;
+    uint8_t  hor_flip;
+    uint8_t  ver_flip;
+    uint16_t anticlockwise_rotation;
+    uint8_t  display_orientation_persistence_flag;
+  };
+
+  class ToneMapping: public SeiPayload
+  {
+  public:
+    uint32_t tone_map_id;
+    uint8_t  tone_map_cancel_flag;
+    uint8_t  tone_map_persistence_flag;
+    uint8_t  coded_data_bit_depth;
+    uint8_t  target_bit_depth;
+    uint32_t tone_map_model_id;
+    uint32_t min_value;
+    uint32_t max_value;
+    uint32_t sigmoid_midpoint;
+    uint32_t sigmoid_width;
+    std::vector<uint32_t> start_of_coded_interval;
+    uint16_t num_pivots;
+    std::vector<uint32_t> coded_pivot_value;
+    std::vector<uint32_t> target_pivot_value;
+    uint8_t  camera_iso_speed_idc;
+    uint32_t camera_iso_speed_value;
+    uint8_t  exposure_index_idc;
+    uint32_t exposure_index_value;
+    uint8_t  exposure_compensation_value_sign_flag;
+    uint16_t exposure_compensation_value_numerator;
+    uint16_t exposure_compensation_value_denom_idc;
+    uint32_t ref_screen_luminance_white;
+    uint32_t extended_range_white_level;
+    uint16_t nominal_black_level_code_value;
+    uint16_t nominal_white_level_code_value;
+    uint16_t extended_white_level_code_value;
+  };
+
+  class MasteringDisplayInfo: public SeiPayload
+  {
+  public:
+    uint16_t display_primary_x[3];
+    uint16_t display_primary_y[3];
+    uint16_t white_point_x;
+    uint16_t white_point_y;
+    uint32_t max_display_mastering_luminance;
+    uint32_t min_display_mastering_luminance;
+  };
+
+  class KneeFunctionInfo: public SeiPayload
+  {
+  public:
+    uint32_t knee_function_id;
+    uint8_t  knee_function_cancel_flag;
+    uint8_t  knee_function_persistence_flag;
+    uint32_t input_d_range;
+    uint32_t input_disp_luminance;
+    uint32_t output_d_range;
+    uint32_t output_disp_luminance;
+    uint32_t num_knee_points_minus1;
+    std::vector<uint16_t> input_knee_point;
+    std::vector<uint16_t> output_knee_point;
+  };
+
+  class ChromaResamplingFilterHint: public SeiPayload
+  {
+  public:
+    uint8_t  ver_chroma_filter_idc;
+    uint8_t  hor_chroma_filter_idc;
+    uint8_t  ver_filtering_field_processing_flag;
+    uint32_t target_format_idc;
+    uint32_t num_vertical_filters;
+    std::vector<uint32_t> ver_tap_length_minus_1;
+    std::vector<std::vector<int32_t> > ver_filter_coeff;
+    uint32_t num_horizontal_filters;
+    std::vector<uint32_t> hor_tap_length_minus_1;
+    std::vector<std::vector<int32_t> > hor_filter_coeff;
+  };
+
+  class ContentLightLevelInfo: public SeiPayload
+  {
+  public:
+    uint16_t max_content_light_level;
+    uint16_t max_pic_average_light_level;
+  };
+
+  class AlternativeTransferCharacteristics: public SeiPayload
+  {
+  public:
+    uint16_t alternative_transfer_characteristics;
+  };
+
+  class DecodedPictureHash: public SeiPayload
+  {
+  public:
+    uint8_t hash_type;
+    std::vector<std::array<uint8_t, 16> > picture_md5;
+    std::vector<uint16_t> picture_crc;
+    std::vector<uint32_t> picture_checksum;
   };
 
   class AUD_NAL: public NALUnit

@@ -207,6 +207,7 @@ namespace AVC
     payload_type = 0;
     payload_size = 0;
     payload_data.clear();
+    sei_payload.reset();
   }
 
 }

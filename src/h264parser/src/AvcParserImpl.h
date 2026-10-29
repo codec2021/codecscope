@@ -27,6 +27,18 @@ namespace AVC
       void processAUD(std::shared_ptr<AUD_NAL> paud, BitstreamReader &bs);
       void processSEI(std::shared_ptr<SEI_NAL> psei, BitstreamReader &bs);
 
+      void processUserDataUnregistered(std::shared_ptr<UserDataUnregistered> p, BitstreamReader &bs, std::size_t payloadSize);
+      void processRecoveryPoint(std::shared_ptr<RecoveryPoint> p, BitstreamReader &bs);
+      void processFramePacking(std::shared_ptr<FramePacking> p, BitstreamReader &bs);
+      void processDisplayOrientation(std::shared_ptr<DisplayOrientation> p, BitstreamReader &bs);
+      void processToneMapping(std::shared_ptr<ToneMapping> p, BitstreamReader &bs);
+      void processMasteringDisplayInfo(std::shared_ptr<MasteringDisplayInfo> p, BitstreamReader &bs);
+      void processKneeFunctionInfo(std::shared_ptr<KneeFunctionInfo> p, BitstreamReader &bs);
+      void processChromaResamplingFilterHint(std::shared_ptr<ChromaResamplingFilterHint> p, BitstreamReader &bs);
+      void processContentLightLevelInfo(std::shared_ptr<ContentLightLevelInfo> p, BitstreamReader &bs);
+      void processAlternativeTransferCharacteristics(std::shared_ptr<AlternativeTransferCharacteristics> p, BitstreamReader &bs);
+      void processDecodedPictureHash(std::shared_ptr<DecodedPictureHash> p, BitstreamReader &bs);
+
       void processScalingMatrix(ScalingMatrix &sm, BitstreamReader &bs);
       void processVuiParameters(VuiParameters &vui, BitstreamReader &bs);
       void processRefPicListModification(RefPicListModification &r, BitstreamReader &bs, bool isB, const Parser::Info &info);

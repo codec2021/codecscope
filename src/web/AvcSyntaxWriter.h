@@ -29,6 +29,17 @@ namespace web
       void createSlice(const AVC::Slice &slice, SyntaxNode &parent);
       void createAUD(const AVC::AUD &aud, SyntaxNode &parent);
       void createSEI(const AVC::SEI_NAL &sei, SyntaxNode &parent);
+      void createUserDataUnregistered(std::shared_ptr<AVC::UserDataUnregistered> p, SyntaxNode &parent);
+      void createRecoveryPoint(std::shared_ptr<AVC::RecoveryPoint> p, SyntaxNode &parent);
+      void createFramePacking(std::shared_ptr<AVC::FramePacking> p, SyntaxNode &parent);
+      void createDisplayOrientation(std::shared_ptr<AVC::DisplayOrientation> p, SyntaxNode &parent);
+      void createToneMapping(std::shared_ptr<AVC::ToneMapping> p, SyntaxNode &parent);
+      void createMasteringDisplayInfo(std::shared_ptr<AVC::MasteringDisplayInfo> p, SyntaxNode &parent);
+      void createKneeFunctionInfo(std::shared_ptr<AVC::KneeFunctionInfo> p, SyntaxNode &parent);
+      void createChromaResamplingFilterHint(std::shared_ptr<AVC::ChromaResamplingFilterHint> p, SyntaxNode &parent);
+      void createContentLightLevelInfo(std::shared_ptr<AVC::ContentLightLevelInfo> p, SyntaxNode &parent);
+      void createAlternativeTransferCharacteristics(std::shared_ptr<AVC::AlternativeTransferCharacteristics> p, SyntaxNode &parent);
+      void createDecodedPictureHash(std::shared_ptr<AVC::DecodedPictureHash> p, SyntaxNode &parent);
       void createScalingMatrix(const AVC::ScalingMatrix &sm, SyntaxNode &parent);
       void createVui(const AVC::VuiParameters &vui, SyntaxNode &parent);
       void createRefPicListModification(const AVC::RefPicListModification &r, bool isB, SyntaxNode &parent);
