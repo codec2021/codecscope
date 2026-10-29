@@ -817,7 +817,9 @@
     var vw = Math.max(300, bitrateView.clientWidth - 24);
     var h = 220;
     var baseBarW = vw / frames.length;
-    var barW = Math.max(2, baseBarW * bitrateZoom);
+    // 首次渲染自适应：默认每帧至少 6px 宽，柱子能看清
+    if (bitrateZoom === 1 && baseBarW < 6) bitrateZoom = 6 / baseBarW;
+    var barW = Math.max(1, baseBarW * bitrateZoom);
     var chartW = frames.length * barW;
     var w = Math.max(vw, chartW);
     var dpr = window.devicePixelRatio || 1;
@@ -2399,6 +2401,7 @@ timeline.addEventListener("click", function (e) {
   // ---------- 文件处理 ----------
   function clearAll() {
     stopPlayback();
+    bitrateZoom = 1; // 重置码率缩放，新文件重新自适应
     if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
     for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
     play.frames = {};
