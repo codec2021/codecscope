@@ -47,6 +47,7 @@ namespace web
         int                              frameNum;
         int                              sliceAddr;
         int                              firstSlice;
+        std::vector<int>                 refPocs;     // 参考帧 POC 列表（从 RPS delta POC 计算）
         std::shared_ptr<HEVC::NALUnit>   nal;
       };
 
@@ -86,6 +87,7 @@ namespace web
       std::map<uint32_t, std::shared_ptr<HEVC::VPS> > m_vpsMap;
       std::map<uint32_t, std::shared_ptr<HEVC::SPS> > m_spsMap;
       std::map<uint32_t, std::shared_ptr<HEVC::PPS> > m_ppsMap;
+      std::map<uint32_t, std::vector<std::vector<int> > > m_spsRpsDeltas; // SPS id → 每个 RPS 的 delta POC 列表
   };
 
 }

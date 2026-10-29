@@ -1036,6 +1036,21 @@
       }
       ctx.strokeRect(hx + 0.5, barTop + 0.5, hlW, barH - 1);
       hlFrame = { slice: selectedSlice, x: hx, w: hlW };
+      // 参考帧高亮（橙色）：选中帧引用的参考帧
+      var selNal = slices[selectedSlice].index;
+      var refPocs = currentData.nalus[selNal] && currentData.nalus[selNal].refPocs;
+      if (refPocs && refPocs.length) {
+        ctx.strokeStyle = "#ff9d00";
+        ctx.lineWidth = 1.5;
+        for (var rp = 0; rp < refPocs.length; rp++) {
+          for (var rs = 0; rs < slices.length; rs++) {
+            if (slices[rs].poc === refPocs[rp]) {
+              ctx.strokeRect(xs[rs] + 0.5, barTop + 1.5, Math.max(1, barW - 1), barH - 3);
+              break;
+            }
+          }
+        }
+      }
       // 自动滚动时间轴，让选中帧保持可见
       var tlWrap = timeline.parentNode;
       if (tlWrap && tlWrap.scrollWidth > tlWrap.clientWidth) {
@@ -1059,6 +1074,7 @@
     var legend = document.getElementById("timelineLegend");
     legend.innerHTML =
       '<b style="color:#E02020">I</b> <b style="color:#4d94e8">P</b> <b style="color:#00B050">B</b>' +
+      ' <b style="color:#ff9d00;outline:1px solid #ff9d00">ref</b>' +
       ' <span style="color:var(--text-dim)"> | Frame# / POC | Click a frame to preview | Zoom</span>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(1)">+</button>' +
       ' <button class="zoom-btn" onclick="window.__tlZoom(-1)">−</button>' +

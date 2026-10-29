@@ -28,6 +28,44 @@ namespace web
       }
     }
 
+    // 计算 SPS 每个 short_term_ref_pic_set 的 delta POC 列表（递归处理 RPS 预测）
+    void computeSpsRpsDeltas(const HEVC::SPS &sps, std::vector<std::vector<int> > &out)
+    {
+      out.clear();
+      out.resize(sps.short_term_ref_pic_set.size());
+      for(std::size_t idx = 0; idx < sps.short_term_ref_pic_set.size(); idx++)
+      {
+        const HEVC::ShortTermRefPicSet &rps = sps.short_term_ref_pic_set[idx];
+        if(idx == 0 || !rps.inter_ref_pic_set_prediction_flag)
+        {
+          for(std::size_t i = 0; i < rps.delta_poc_s0_minus1.size(); i++)
+            out[idx].push_back(-(int)(rps.delta_poc_s0_minus1[i] + 1));
+          for(std::size_t i = 0; i < rps.delta_poc_s1_minus1.size(); i++)
+            out[idx].push_back((int)(rps.delta_poc_s1_minus1[i] + 1));
+        }
+        else
+        {
+          std::size_t refIdx = idx - (rps.delta_idx_minus1 + 1);
+          if(refIdx >= out.size()) continue;
+          int deltaRps = (rps.delta_rps_sign ? 1 : -1) * ((int)rps.abs_delta_rps_minus1 + 1);
+          const std::vector<int> &refDeltas = out[refIdx];
+          for(std::size_t j = 0; j < refDeltas.size(); j++)
+          {
+            int d = refDeltas[j] + deltaRps;
+            bool use = true;
+            if(j < rps.used_by_curr_pic_flag.size())
+            {
+              use = rps.used_by_curr_pic_flag[j] != 0;
+              if(!use && j < rps.use_delta_flag.size()) use = rps.use_delta_flag[j] != 0;
+            }
+            if(use) out[idx].push_back(d);
+          }
+          if(rps.used_by_curr_pic_flag.size() > refDeltas.size() && rps.used_by_curr_pic_flag[refDeltas.size()])
+            out[idx].push_back(deltaRps);
+        }
+      }
+    }
+
     std::string transferCharacteristicsToString(uint32_t value)
     {
       switch(value)
@@ -199,6 +237,55 @@ namespace web
     m_pocInitialized = true;
 
     e.slicePoc = pocFull;
+
+    // 参考帧 POC：从 RPS 的 delta POC 计算（含 RPS 预测推导）
+    e.refPocs.clear();
+    std::vector<int> deltas;
+    auto spsDeltasIt = m_spsRpsDeltas.end();
+    if(sps)
+      spsDeltasIt = m_spsRpsDeltas.find(sps->sps_seq_parameter_set_id);
+
+    if(pSlice->short_term_ref_pic_set_sps_flag && spsDeltasIt != m_spsRpsDeltas.end())
+    {
+      std::size_t idx = pSlice->short_term_ref_pic_set_idx;
+      if(idx < spsDeltasIt->second.size())
+        deltas = spsDeltasIt->second[idx];
+    }
+    else if(!pSlice->short_term_ref_pic_set.inter_ref_pic_set_prediction_flag)
+    {
+      for(std::size_t i = 0; i < pSlice->short_term_ref_pic_set.delta_poc_s0_minus1.size(); i++)
+        deltas.push_back(-(int)(pSlice->short_term_ref_pic_set.delta_poc_s0_minus1[i] + 1));
+      for(std::size_t i = 0; i < pSlice->short_term_ref_pic_set.delta_poc_s1_minus1.size(); i++)
+        deltas.push_back((int)(pSlice->short_term_ref_pic_set.delta_poc_s1_minus1[i] + 1));
+    }
+    else if(sps && spsDeltasIt != m_spsRpsDeltas.end())
+    {
+      // slice 级预测 RPS：参考 SPS 的 RPS（stRpsIdx = num_short_term_ref_pic_sets）
+      const HEVC::ShortTermRefPicSet &rps = pSlice->short_term_ref_pic_set;
+      std::size_t stRpsIdx = sps->num_short_term_ref_pic_sets;
+      std::size_t refIdx = stRpsIdx - (rps.delta_idx_minus1 + 1);
+      int deltaRps = (rps.delta_rps_sign ? 1 : -1) * ((int)rps.abs_delta_rps_minus1 + 1);
+      if(refIdx < spsDeltasIt->second.size())
+      {
+        const std::vector<int> &refDeltas = spsDeltasIt->second[refIdx];
+        for(std::size_t j = 0; j < refDeltas.size(); j++)
+        {
+          int d = refDeltas[j] + deltaRps;
+          bool use = true;
+          if(j < rps.used_by_curr_pic_flag.size())
+          {
+            use = rps.used_by_curr_pic_flag[j] != 0;
+            if(!use && j < rps.use_delta_flag.size()) use = rps.use_delta_flag[j] != 0;
+          }
+          if(use) deltas.push_back(d);
+        }
+        if(rps.used_by_curr_pic_flag.size() > refDeltas.size() && rps.used_by_curr_pic_flag[refDeltas.size()])
+          deltas.push_back(deltaRps);
+      }
+    }
+
+    for(std::size_t k = 0; k < deltas.size(); k++)
+      e.refPocs.push_back(pocFull + deltas[k]);
   }
 
   void WebParser::onNALUnit(std::shared_ptr<HEVC::NALUnit> pNALUnit, const HEVC::Parser::Info *pInfo)
@@ -246,6 +333,7 @@ namespace web
         m_profilePresent = true;
         m_lastSPS = pSPS;
         m_spsMap[pSPS -> sps_seq_parameter_set_id] = pSPS;
+        computeSpsRpsDeltas(*pSPS, m_spsRpsDeltas[pSPS -> sps_seq_parameter_set_id]);
         break;
       }
 
@@ -447,6 +535,13 @@ namespace web
       out += std::to_string(m_nalus[i].firstSlice);
       out += ",\"frameNum\":";
       out += std::to_string(m_nalus[i].frameNum);
+      out += ",\"refPocs\":[";
+      for(std::size_t r = 0; r < m_nalus[i].refPocs.size(); r++)
+      {
+        if(r) out += ",";
+        out += std::to_string(m_nalus[i].refPocs[r]);
+      }
+      out += "]";
       out += "}";
     }
     out += "]";
