@@ -33,7 +33,7 @@ body { display: flex; flex-direction: column; }
 .topbar h1 { margin: 0; font-size: 14px; font-weight: 600; }
 .accent { color: var(--accent); }
 
-.header-actions { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.header-actions { display: flex; align-items: center; gap: 12px; min-width: 0; position: relative; }
 
 .btn { flex: 0 0 auto; }
 
@@ -68,6 +68,28 @@ body { display: flex; flex-direction: column; }
   padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 500;
   background: var(--bg-elevated); color: var(--text-dim); border: 1px solid var(--border);
 }
+
+/* 插件管理下拉菜单 */
+.plugin-menu {
+  position: absolute; top: 100%; right: 0; margin-top: 6px; z-index: 5000;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+  width: 300px; max-height: 320px; overflow: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 8px;
+}
+.plugin-load {
+  width: 100%; padding: 6px 10px; background: var(--accent-soft); color: #7ec8ff;
+  border: 1px solid var(--accent); border-radius: 4px; cursor: pointer; font-size: 12px; margin-bottom: 6px;
+}
+.plugin-list { display: flex; flex-direction: column; gap: 4px; }
+.plugin-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; font-size: 12px;
+}
+.plugin-item .p-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-item .p-kind { color: var(--text-dim); font-size: 11px; }
+.plugin-item input[type=checkbox] { cursor: pointer; }
+.plugin-item .p-del { cursor: pointer; color: #e05555; background: none; border: none; font-size: 14px; padding: 0 2px; }
+.plugin-empty { color: var(--text-dim); font-size: 12px; padding: 6px 4px; text-align: center; }
 
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex;

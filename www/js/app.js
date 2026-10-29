@@ -2141,8 +2141,13 @@ timeline.addEventListener("click", function (e) {
     }
 
     var syntaxNode = nal.jpegSyntax || fetchNalSyntax(index);
-    if (!nal.jpegSyntax && /SEI/i.test(nal.typeName || "") && window.CodecScope && window.CodecScope.runSeiPlugin) {
-      var pnode = window.CodecScope.runSeiPlugin(fileBytes, nal, currentCodec);
+    if (!nal.jpegSyntax && window.CodecScope) {
+      var pnode = null;
+      if (/SEI/i.test(nal.typeName || "") && window.CodecScope.runSeiPlugin) {
+        pnode = window.CodecScope.runSeiPlugin(fileBytes, nal, currentCodec);
+      } else if (window.CodecScope.runNalPlugin) {
+        pnode = window.CodecScope.runNalPlugin(fileBytes, nal, currentCodec);
+      }
       if (pnode) {
         if (!syntaxNode.c) syntaxNode.c = [];
         syntaxNode.c.push(pnode);
@@ -2577,35 +2582,117 @@ timeline.addEventListener("click", function (e) {
   // ---------- 插件加载 ----------
   var pluginBtn = document.getElementById("pluginBtn");
   var pluginInput = document.getElementById("pluginInput");
-  function loadPlugin(code, name) {
-    try {
-      var before = (window.CodecScope && window.CodecScope.getPlugins) ? window.CodecScope.getPlugins().length : 0;
-      var blob = new Blob([code], { type: "text/javascript" });
-      var url = URL.createObjectURL(blob);
-      var s = document.createElement("script");
-      s.onload = function () {
-        URL.revokeObjectURL(url);
-        var after = (window.CodecScope && window.CodecScope.getPlugins) ? window.CodecScope.getPlugins().length : 0;
-        setStatus("Plugin loaded: " + name + " · registered " + (after - before) + " SEI parser(s)");
-      };
-      s.onerror = function () {
-        URL.revokeObjectURL(url);
-        setStatus("Plugin load failed: " + name);
-      };
-      s.src = url;
-      document.head.appendChild(s);
-    } catch (err) {
-      setStatus("Plugin load error: " + err.message);
-    }
+  var pluginMenu = document.getElementById("pluginMenu");
+  var pluginLoadBtn = document.getElementById("pluginLoadBtn");
+  var pluginList = document.getElementById("pluginList");
+
+  var PLUGIN_STORE_KEY = "codecscope_plugins";
+  function savedPluginSources() {
+    try { var s = localStorage.getItem(PLUGIN_STORE_KEY); return s ? JSON.parse(s) : []; }
+    catch (e) { return []; }
   }
-  if (pluginBtn && pluginInput) {
-    pluginBtn.addEventListener("click", function () { pluginInput.click(); });
-    pluginInput.addEventListener("change", function () {
-      var f = pluginInput.files[0];
-      if (!f) return;
-      var reader = new FileReader();
-      reader.onload = function (e) { loadPlugin(e.target.result, f.name); pluginInput.value = ""; };
-      reader.readAsText(f);
+  function persistPluginSource(name, code) {
+    var list = savedPluginSources();
+    list.push({ name: name, code: code });
+    try { localStorage.setItem(PLUGIN_STORE_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+  function removePluginSource(name) {
+    var list = savedPluginSources().filter(function (p) { return p.name !== name; });
+    try { localStorage.setItem(PLUGIN_STORE_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  function loadPlugin(code, name, persist) {
+    return new Promise(function (resolve) {
+      try {
+        var blob = new Blob([code], { type: "text/javascript" });
+        var url = URL.createObjectURL(blob);
+        var s = document.createElement("script");
+        s.onload = function () {
+          URL.revokeObjectURL(url);
+          if (persist) persistPluginSource(name, code);
+          resolve();
+        };
+        s.onerror = function () { URL.revokeObjectURL(url); resolve(); };
+        s.src = url;
+        document.head.appendChild(s);
+      } catch (err) { resolve(); }
+    });
+  }
+
+  function renderPluginList() {
+    if (!pluginList || !window.CodecScope) return;
+    var pls = window.CodecScope.getPlugins();
+    pluginList.innerHTML = "";
+    if (pls.length === 0) {
+      pluginList.innerHTML = '<div class="plugin-empty">No plugins loaded</div>';
+      return;
+    }
+    pls.forEach(function (p) {
+      var item = document.createElement("div");
+      item.className = "plugin-item";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = p.enabled;
+      cb.title = "Enable / disable";
+      cb.addEventListener("change", function () { window.CodecScope.setPluginEnabled(p.id, cb.checked); });
+      var name = document.createElement("span");
+      name.className = "p-name";
+      name.textContent = p.name;
+      var kind = document.createElement("span");
+      kind.className = "p-kind";
+      kind.textContent = p.payloadTypes.length ? ("SEI " + p.payloadTypes.join(",")) : ("NAL " + p.nalTypes.join(","));
+      var del = document.createElement("button");
+      del.className = "p-del";
+      del.textContent = "\u2715";
+      del.title = "Remove";
+      del.addEventListener("click", function () {
+        window.CodecScope.removePlugin(p.id);
+        removePluginSource(p.name);
+        renderPluginList();
+      });
+      item.appendChild(cb);
+      item.appendChild(name);
+      item.appendChild(kind);
+      item.appendChild(del);
+      pluginList.appendChild(item);
+    });
+  }
+
+  if (pluginBtn && pluginMenu) {
+    pluginBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      pluginMenu.classList.toggle("hidden");
+      if (!pluginMenu.classList.contains("hidden")) renderPluginList();
+    });
+    document.addEventListener("click", function (e) {
+      if (!pluginMenu.classList.contains("hidden") && !pluginMenu.contains(e.target) && e.target !== pluginBtn) {
+        pluginMenu.classList.add("hidden");
+      }
+    });
+  }
+  if (pluginLoadBtn) pluginLoadBtn.addEventListener("click", function () { pluginInput.click(); });
+  pluginInput.addEventListener("change", function () {
+    var f = pluginInput.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      loadPlugin(e.target.result, f.name, true).then(function () {
+        setStatus("Plugin loaded: " + f.name);
+        renderPluginList();
+      });
+      pluginInput.value = "";
+    };
+    reader.readAsText(f);
+  });
+
+  function restorePlugins() {
+    var list = savedPluginSources();
+    if (list.length === 0) return;
+    var chain = Promise.resolve();
+    list.forEach(function (p) { chain = chain.then(function () { return loadPlugin(p.code, p.name, false); }); });
+    chain.then(function () {
+      if (window.CodecScope && window.CodecScope.getPlugins().length > 0)
+        setStatus("Restored " + window.CodecScope.getPlugins().length + " plugin(s) from local storage");
     });
   }
 
@@ -2725,6 +2812,7 @@ timeline.addEventListener("click", function (e) {
     makeSplitterCol("splitBottomCol", bottomPanels);
     makeSplitterRow("splitMainRow", bottomPanels);
     setMobileView = initMobileNav();
+    if (typeof window.CodecScope === "object") restorePlugins();
     if (typeof createHevcModule !== "function") {
       setStatus("Error: WASM module (hevc.js) not found");
       return;

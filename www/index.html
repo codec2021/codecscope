@@ -16,7 +16,11 @@
       <input type="file" id="fileInput" hidden accept="video/*,image/*,.h264,.h265,.hevc,.h266,.vvc,.266,.265,.264,.avc,.bin,.bit,.mp4,.m4v,.mov,.webm,.ts,.m2ts,.mts,.heic,.heif,.avif,.av1,.ivf,.obu,.png,.jpg,.jpeg,.gif,.webp,.bmp">
       <span id="fileName" class="file-name">No file loaded</span>
       <button id="helpBtn" class="btn btn-secondary" title="Help & About">? Help</button>
-      <button id="pluginBtn" class="btn btn-secondary" title="Load a SEI plugin (.js)">⚙ Plugin</button>
+      <button id="pluginBtn" class="btn btn-secondary" title="Manage plugins">⚙ Plugin</button>
+      <div id="pluginMenu" class="plugin-menu hidden">
+        <button id="pluginLoadBtn" class="plugin-load">+ Load .js plugin file</button>
+        <div id="pluginList" class="plugin-list"></div>
+      </div>
       <button id="exportBtn" class="btn btn-secondary" title="Export analysis report">⬇ Export</button>
       <input type="file" id="pluginInput" hidden accept=".js">
       <span class="version-badge">v1.0.0</span>
