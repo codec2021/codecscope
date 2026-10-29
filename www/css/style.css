@@ -273,7 +273,7 @@ td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
 .bitrate-chart { display: block; width: 100%; }
 .br-chart-wrap { position: relative; }
 .br-cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.8); pointer-events: none; display: none; box-shadow: 0 0 2px rgba(0,0,0,.6); }
-.br-hover { color: #ffd75e; flex: 0 0 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-hover { color: #ffd75e; flex: 0 0 230px; min-width: 230px; max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .br-legend { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .br-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 
