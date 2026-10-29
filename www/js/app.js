@@ -817,7 +817,7 @@
     var vw = Math.max(300, bitrateView.clientWidth - 24);
     var h = 220;
     var baseBarW = vw / frames.length;
-    var barW = Math.max(1, baseBarW * bitrateZoom);
+    var barW = Math.max(2, baseBarW * bitrateZoom);
     var chartW = frames.length * barW;
     var w = Math.max(vw, chartW);
     var dpr = window.devicePixelRatio || 1;
@@ -846,10 +846,10 @@
       var bh = maxBitrate > 0 ? Math.max(1, (bit / maxBitrate) * chartH) : 0;
       var x = i * barW;
       ctx.fillStyle = (i === selectedFrame) ? "#ffffff" : (tcolors[ftypes[i]] || "#888");
-      ctx.fillRect(x, baseY - bh, Math.max(0.5, barW - 0.5), bh);
+      ctx.fillRect(x, baseY - bh, Math.max(1, barW - 1), bh);
       if (i === selectedFrame) {
         ctx.fillStyle = "#ffd75e";
-        ctx.fillRect(x, baseY - bh - 4, Math.max(0.5, barW - 0.5), 3);
+        ctx.fillRect(x, baseY - bh - 4, Math.max(1, barW - 1), 3);
       }
     }
 
@@ -913,7 +913,8 @@
       var f = frameAt(e);
       if (f < 0) { hoverEl.textContent = ""; cursorEl.style.display = "none"; return; }
       var tname = ftypes[f] === 2 ? "I" : ftypes[f] === 0 ? "P" : "B";
-      hoverEl.textContent = "Frame #" + f + " · " + tname + " · " + fmtSize(sizes[f]) + " · " + fmtBitrate(sizes[f] * 8 * fps);
+      var tcolor = ftypes[f] === 2 ? "#E02020" : ftypes[f] === 0 ? "#4d94e8" : "#00B050";
+      hoverEl.innerHTML = 'Frame <b>#' + f + '</b> <b style="color:' + tcolor + '">' + tname + '</b> POC ' + frames[f].poc + ' · ' + fmtSize(sizes[f]) + ' · ' + fmtBitrate(sizes[f] * 8 * fps);
       cursorEl.style.display = "block";
       cursorEl.style.left = (f * barW + barW / 2) + "px";
     });

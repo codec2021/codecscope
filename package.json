@@ -1,0 +1,9 @@
+{
+  "name": "codecscope",
+  "version": "1.0.0",
+  "description": "H.264/H.265/H.266/AV1/VP9 bitstream & image analyzer (browser)",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
