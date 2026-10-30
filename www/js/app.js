@@ -811,7 +811,6 @@
     html += '<span>Min: <b style="color:#4d94e8">' + fmtBitrate(minBitrate) + ' @ #' + minIdx + '</b></span>';
     html += '<span class="br-legend"><i style="background:#E02020"></i>I ' + cntI + ' <i style="background:#4d94e8"></i>P ' + cntP + ' <i style="background:#00B050"></i>B ' + cntB + '</span>';
     html += '<span>Zoom: <button class="zoom-btn" onclick="window.__brZoom(-1)">−</button> <button class="zoom-btn" onclick="window.__brZoom(1)">+</button></span>';
-    html += '<span class="br-hover"></span>';
     html += '</div>';
 
     var vw = Math.max(300, bitrateView.clientWidth - 24);
@@ -870,25 +869,20 @@
     }
     ctx.stroke();
 
-    // 水平标记线：平均（绿）、峰值（红）、最小（蓝），数值标注在各自线旁
+    // 水平标记线：平均（绿虚线）、峰值（红虚线）、最小（蓝虚线）；数值见上方统计栏
     ctx.setLineDash([4, 4]);
     ctx.lineWidth = 1;
-    ctx.font = "9px monospace";
-    ctx.textBaseline = "alphabetic";
-    function hLine(y, color, label) {
+    function hLine(y, color) {
       ctx.strokeStyle = color;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-      ctx.fillStyle = color;
-      var ty = Math.max(10, y - 3);
-      ctx.fillText(label, 6, ty);
     }
     if (maxBitrate > 0) {
       var avgY = baseY - (avgBitrate / maxBitrate) * chartH;
       var peakY = baseY - chartH;
       var minY = baseY - (minBitrate / maxBitrate) * chartH;
-      hLine(avgY, "#00d68f", "avg " + fmtBitrate(avgBitrate));
-      hLine(peakY, "#e05555", "peak " + fmtBitrate(maxBitrate));
-      hLine(minY, "#4d94e8", "min " + fmtBitrate(minBitrate));
+      hLine(avgY, "#00d68f");
+      hLine(peakY, "#e05555");
+      hLine(minY, "#4d94e8");
     }
     ctx.setLineDash([]);
 
@@ -898,13 +892,16 @@
 
     var cursorEl = document.createElement("div");
     cursorEl.className = "br-cursor";
+    var tooltipEl = document.createElement("div");
+    tooltipEl.className = "br-tooltip";
+    tooltipEl.style.display = "none";
     wrap.appendChild(canvas);
     wrap.appendChild(cursorEl);
+    wrap.appendChild(tooltipEl);
 
     bitrateView.innerHTML = html;
     bitrateView.appendChild(wrap);
 
-    var hoverEl = bitrateView.querySelector(".br-hover");
     function frameAt(e) {
       var rect = canvas.getBoundingClientRect();
       var x = e.clientX - rect.left;
@@ -913,14 +910,18 @@
     }
     canvas.addEventListener("mousemove", function (e) {
       var f = frameAt(e);
-      if (f < 0) { hoverEl.textContent = ""; cursorEl.style.display = "none"; return; }
+      if (f < 0) { tooltipEl.style.display = "none"; cursorEl.style.display = "none"; return; }
       var tname = ftypes[f] === 2 ? "I" : ftypes[f] === 0 ? "P" : "B";
       var tcolor = ftypes[f] === 2 ? "#E02020" : ftypes[f] === 0 ? "#4d94e8" : "#00B050";
-      hoverEl.innerHTML = 'Frame <b>#' + f + '</b> <b style="color:' + tcolor + '">' + tname + '</b> POC ' + frames[f].poc + ' · ' + fmtSize(sizes[f]) + ' · ' + fmtBitrate(sizes[f] * 8 * fps);
+      tooltipEl.innerHTML = 'Frame <b>#' + f + '</b> <b style="color:' + tcolor + '">' + tname + '</b> POC ' + frames[f].poc + ' · ' + fmtSize(sizes[f]) + ' · ' + fmtBitrate(sizes[f] * 8 * fps);
+      var rect = canvas.getBoundingClientRect();
+      tooltipEl.style.display = "block";
+      tooltipEl.style.left = Math.min(e.clientX - rect.left + 12, rect.width - 180) + "px";
+      tooltipEl.style.top = (e.clientY - rect.top - 34) + "px";
       cursorEl.style.display = "block";
       cursorEl.style.left = (f * barW + barW / 2) + "px";
     });
-    canvas.addEventListener("mouseleave", function () { hoverEl.textContent = ""; cursorEl.style.display = "none"; });
+    canvas.addEventListener("mouseleave", function () { tooltipEl.style.display = "none"; cursorEl.style.display = "none"; });
     canvas.addEventListener("click", function (e) {
       var f = frameAt(e);
       if (f < 0) return;
