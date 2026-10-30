@@ -1118,18 +1118,16 @@
     // 加上横向滚动偏移：x 是相对可见区域，需换算成 canvas 完整坐标
     var tlWrap = timeline.parentNode;
     if (tlWrap && tlWrap.scrollLeft) x += tlWrap.scrollLeft;
-    // 二分查找最后一个 xs[i] <= x 的 i（落在色块内）
+    // 二分查找最后一个 xs[i] <= x 的 i
     var lo = 0, hi = xs.length - 1, ans = -1;
     while (lo <= hi) {
       var mid = (lo + hi) >> 1;
       if (xs[mid] <= x) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
     }
-    if (ans >= 0 && ans < xs.length) {
-      // 若 x 落在帧间空隙或超过色块右边界，则不属于任何 slice
-      if (x > xs[ans] + barW) return -1;
-      return ans;
-    }
-    return -1;
+    // 落在帧间空隙时返回左侧最近的 slice（而非 -1），保证点击都能选中
+    if (ans < 0) return 0;
+    if (ans >= xs.length) return xs.length - 1;
+    return ans;
   }
   function timelineMove(e) {
     if (!timeline._slices) return;
@@ -2213,6 +2211,10 @@ timeline.addEventListener("click", function (e) {
     initPlayDecoder(function () {
       if (needReset) play.feedFrame = keyFi - 1;
       feedFrames(fi);
+      if (play.decoder && play.decoder.state === "configured") {
+        var fd = function () { play.feedFrame = -1; };
+        try { play.decoder.flush().then(fd).catch(fd); } catch (e) { fd(); }
+      }
       var waited = 0;
       var check = setInterval(function () {
         var frame = play.frames[fi];
