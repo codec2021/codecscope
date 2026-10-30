@@ -1121,9 +1121,7 @@
   function sliceAtX(x) {
     var xs = timeline._xs, barW = timeline._barW;
     if (!xs || xs.length === 0) return -1;
-    // 加上横向滚动偏移：x 是相对可见区域，需换算成 canvas 完整坐标
-    var tlWrap = timeline.parentNode;
-    if (tlWrap && tlWrap.scrollLeft) x += tlWrap.scrollLeft;
+    // 注：x = clientX - rect.left 已是 canvas 完整坐标（getBoundingClientRect().left 会随容器滚动左移），无需再加 scrollLeft
     // 超出时间轴首尾范围则不属于任何 slice
     if (x < xs[0] || x > xs[xs.length - 1] + barW) return -1;
     // 二分查找最后一个 xs[i] <= x 的 i
