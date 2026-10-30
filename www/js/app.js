@@ -1112,6 +1112,9 @@
   function sliceAtX(x) {
     var xs = timeline._xs, barW = timeline._barW;
     if (!xs || xs.length === 0) return -1;
+    // 加上横向滚动偏移：x 是相对可见区域，需换算成 canvas 完整坐标
+    var tlWrap = timeline.parentNode;
+    if (tlWrap && tlWrap.scrollLeft) x += tlWrap.scrollLeft;
     // 二分查找最后一个 xs[i] <= x 的 i（落在色块内）
     var lo = 0, hi = xs.length - 1, ans = -1;
     while (lo <= hi) {
