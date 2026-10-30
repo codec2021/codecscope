@@ -1120,19 +1120,8 @@
   }
   function sliceAtX(x) {
     var xs = timeline._xs, barW = timeline._barW;
-    if (!xs || xs.length === 0) return -1;
     // 注：x = clientX - rect.left 已是 canvas 完整坐标（getBoundingClientRect().left 会随容器滚动左移），无需再加 scrollLeft
-    // 超出时间轴首尾范围则不属于任何 slice
-    if (x < xs[0] || x > xs[xs.length - 1] + barW) return -1;
-    // 二分查找最后一个 xs[i] <= x 的 i
-    var lo = 0, hi = xs.length - 1, ans = -1;
-    while (lo <= hi) {
-      var mid = (lo + hi) >> 1;
-      if (xs[mid] <= x) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
-    }
-    // 落在帧间空隙时返回左侧最近的 slice（而非 -1），保证点击都能选中
-    if (ans < 0) return 0;
-    return ans;
+    return H26xDemux.sliceIndexAtX(xs, barW, x);
   }
   function timelineMove(e) {
     if (!timeline._slices) return;

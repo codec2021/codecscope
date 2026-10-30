@@ -1837,6 +1837,20 @@
     isFlv: isFlv,
     demuxFlv: demuxFlv,
     isAvif: isAvif,
-    parseAvif: parseAvif
+    parseAvif: parseAvif,
+    // 时间轴坐标 → slice 索引映射（纯函数，供单元测试）
+    // xs: 每个 slice 的 x 坐标（升序）；barW: 色块宽度；x: 相对 canvas 的完整坐标
+    // 返回：落在色块/空隙上的最近 slice 索引；超出时间轴首尾返回 -1
+    sliceIndexAtX: function (xs, barW, x) {
+      if (!xs || xs.length === 0) return -1;
+      if (x < xs[0] || x > xs[xs.length - 1] + barW) return -1;
+      var lo = 0, hi = xs.length - 1, ans = -1;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (xs[mid] <= x) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
+      }
+      if (ans < 0) return 0;
+      return ans;
+    }
   };
 })();
