@@ -803,14 +803,14 @@
     var avgBitrate = frames.length > 0 ? total * 8 * fps / frames.length : 0;
 
     var html = '<div class="bitrate-stats">';
-    html += '<span>Frames: <b>' + frames.length + '</b></span>';
-    html += '<span>FPS: <b>' + fps + '</b></span>';
-    html += '<span>Total: <b>' + fmtSize(total) + '</b></span>';
-    html += '<span>Avg: <b style="color:#00d68f">' + fmtBitrate(avgBitrate) + '</b></span>';
-    html += '<span>Peak: <b style="color:#e05555">' + fmtBitrate(maxBitrate) + ' @ #' + maxIdx + '</b></span>';
-    html += '<span>Min: <b style="color:#4d94e8">' + fmtBitrate(minBitrate) + ' @ #' + minIdx + '</b></span>';
-    html += '<span class="br-legend"><i style="background:#E02020"></i>I ' + cntI + ' <i style="background:#4d94e8"></i>P ' + cntP + ' <i style="background:#00B050"></i>B ' + cntB + '</span>';
-    html += '<span>Zoom: <button class="zoom-btn" onclick="window.__brZoom(-1)">−</button> <button class="zoom-btn" onclick="window.__brZoom(1)">+</button></span>';
+    html += '<div class="br-stat"><span class="l">Frames</span><b>' + frames.length + '</b></div>';
+    html += '<div class="br-stat"><span class="l">FPS</span><b>' + fps + '</b></div>';
+    html += '<div class="br-stat"><span class="l">Total</span><b>' + fmtSize(total) + '</b></div>';
+    html += '<div class="br-stat"><span class="l">Avg</span><b style="color:#00d68f">' + fmtBitrate(avgBitrate) + '</b></div>';
+    html += '<div class="br-stat"><span class="l">Peak</span><b style="color:#e05555">' + fmtBitrate(maxBitrate) + '</b></div>';
+    html += '<div class="br-stat"><span class="l">Min</span><b style="color:#4d94e8">' + fmtBitrate(minBitrate) + '</b></div>';
+    html += '<div class="br-legend"><i style="background:#E02020"></i>I ' + cntI + ' <i style="background:#4d94e8"></i>P ' + cntP + ' <i style="background:#00B050"></i>B ' + cntB + '</div>';
+    html += '<div class="br-zoom">Zoom <button class="zoom-btn" onclick="window.__brZoom(-1)">−</button> <button class="zoom-btn" onclick="window.__brZoom(1)">+</button></div>';
     html += '</div>';
 
     var vw = Math.max(300, bitrateView.clientWidth - 24);
@@ -841,6 +841,23 @@
     var baseY = h - 8;
     var tcolors = { 2: "#E02020", 0: "#4d94e8", 1: "#00B050" };
 
+    // 水平标记线（先画在底层，柱子覆盖其上，虚线在柱间可见）
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1;
+    function hLine(y, color) {
+      ctx.strokeStyle = color;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+    if (maxBitrate > 0) {
+      var avgY = baseY - (avgBitrate / maxBitrate) * chartH;
+      var peakY = baseY - chartH;
+      var minY = baseY - (minBitrate / maxBitrate) * chartH;
+      hLine(avgY, "#00d68f");
+      hLine(peakY, "#e05555");
+      hLine(minY, "#4d94e8");
+    }
+    ctx.setLineDash([]);
+
     // 柱状图：每帧瞬时码率，按帧类型着色
     for (var i = 0; i < frames.length; i++) {
       var bit = sizes[i] * 8 * fps;
@@ -868,23 +885,6 @@
       else ctx.lineTo(cx, cy);
     }
     ctx.stroke();
-
-    // 水平标记线：平均（绿虚线）、峰值（红虚线）、最小（蓝虚线）；数值见上方统计栏
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1;
-    function hLine(y, color) {
-      ctx.strokeStyle = color;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-    }
-    if (maxBitrate > 0) {
-      var avgY = baseY - (avgBitrate / maxBitrate) * chartH;
-      var peakY = baseY - chartH;
-      var minY = baseY - (minBitrate / maxBitrate) * chartH;
-      hLine(avgY, "#00d68f");
-      hLine(peakY, "#e05555");
-      hLine(minY, "#4d94e8");
-    }
-    ctx.setLineDash([]);
 
     ctx.fillStyle = "#888";
     ctx.font = "9px monospace";
@@ -916,8 +916,10 @@
       tooltipEl.innerHTML = 'Frame <b>#' + f + '</b> <b style="color:' + tcolor + '">' + tname + '</b> POC ' + frames[f].poc + ' · ' + fmtSize(sizes[f]) + ' · ' + fmtBitrate(sizes[f] * 8 * fps);
       var rect = canvas.getBoundingClientRect();
       tooltipEl.style.display = "block";
-      tooltipEl.style.left = Math.min(e.clientX - rect.left + 12, rect.width - 180) + "px";
-      tooltipEl.style.top = (e.clientY - rect.top - 34) + "px";
+      var tx = e.clientX - rect.left + 14;
+      if (tx > rect.width - 220) tx = e.clientX - rect.left - 220;
+      tooltipEl.style.left = tx + "px";
+      tooltipEl.style.top = Math.max(0, e.clientY - rect.top - 36) + "px";
       cursorEl.style.display = "block";
       cursorEl.style.left = (f * barW + barW / 2) + "px";
     });
