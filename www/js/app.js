@@ -54,6 +54,7 @@
 
   var ROW_HEIGHT = 22;
   var timelineZoom = 1.15;  // 时间轴缩放倍数
+  var tlAutoZoomDone = false; // 时间轴是否已完成首次自适应放大
   var bitrateZoom = 1;      // 码率柱状图缩放倍数
   var setMobileView = null; // 移动端视图切换函数
   var selectedSlice = -1; // 时间轴上选中的帧
@@ -963,6 +964,9 @@
     var barH = TL_BAR_H;
     var wrapW = timeline.parentNode.clientWidth - 24;
     var fitBarW = wrapW / slices.length;
+    // 首次自适应：帧太窄时默认放大到每帧 5px，保证点击命中
+    if (!tlAutoZoomDone && fitBarW > 0 && fitBarW < 5) timelineZoom = 5 / fitBarW;
+    tlAutoZoomDone = true;
     var barW = Math.max(TL_MIN_BAR_W, fitBarW * timelineZoom);
     var frameGap = Math.max(2, Math.round(barW * TL_FRAME_GAP_RATIO));
     var innerGap = Math.max(0, Math.round(barW * TL_INNER_GAP_RATIO));
@@ -1062,6 +1066,8 @@
       if (tlWrap && tlWrap.scrollWidth > tlWrap.clientWidth) {
         var target = hx - tlWrap.clientWidth / 2;
         if (target < 0) target = 0;
+        var maxScroll = tlWrap.scrollWidth - tlWrap.clientWidth;
+        if (target > maxScroll) target = maxScroll;
         tlWrap.scrollLeft = target;
       }
     } else {
@@ -1118,6 +1124,8 @@
     // 加上横向滚动偏移：x 是相对可见区域，需换算成 canvas 完整坐标
     var tlWrap = timeline.parentNode;
     if (tlWrap && tlWrap.scrollLeft) x += tlWrap.scrollLeft;
+    // 超出时间轴首尾范围则不属于任何 slice
+    if (x < xs[0] || x > xs[xs.length - 1] + barW) return -1;
     // 二分查找最后一个 xs[i] <= x 的 i
     var lo = 0, hi = xs.length - 1, ans = -1;
     while (lo <= hi) {
@@ -1126,7 +1134,6 @@
     }
     // 落在帧间空隙时返回左侧最近的 slice（而非 -1），保证点击都能选中
     if (ans < 0) return 0;
-    if (ans >= xs.length) return xs.length - 1;
     return ans;
   }
   function timelineMove(e) {
@@ -1473,6 +1480,8 @@ timeline.addEventListener("click", function (e) {
       if (wrap && wrap.scrollWidth > wrap.clientWidth) {
         var target = hx - wrap.clientWidth / 2;
         if (target < 0) target = 0;
+        var maxScroll = wrap.scrollWidth - wrap.clientWidth;
+        if (target > maxScroll) target = maxScroll;
         wrap.scrollLeft = target;
       }
     } else {
@@ -2410,6 +2419,8 @@ timeline.addEventListener("click", function (e) {
   function clearAll() {
     stopPlayback();
     bitrateZoom = 1; // 重置码率缩放，新文件重新自适应
+    timelineZoom = 1.15; // 重置时间轴缩放，新文件重新自适应
+    tlAutoZoomDone = false;
     if (play.decoder) { try { play.decoder.close(); } catch (e) {} play.decoder = null; }
     for (var k in play.frames) { try { play.frames[k].close(); } catch (e) {} }
     play.frames = {};
