@@ -781,6 +781,16 @@ void HevcParserImpl::processSEI(std::shared_ptr<SEI> psei, BitstreamReader &bs, 
         break;
       }
 
+      case SeiMessage::USER_DATA_REGISTERED_ITU_T_T35:
+      {
+        std::shared_ptr<UserDataRegisteredItuTT35> pseiPayload(new UserDataRegisteredItuTT35);
+        pseiPayload->toDefault();
+        BitstreamReader tmpBs = bs;
+        processUserDataRegisteredItuTT35(pseiPayload, tmpBs, payloadSize);
+        msg.sei_payload = std::dynamic_pointer_cast<SeiPayload>(pseiPayload);
+        break;
+      }
+
       case SeiMessage::SCENE_INFO:
       {
         std::shared_ptr<SceneInfo> pseiPayload(new SceneInfo);
@@ -1740,6 +1750,182 @@ void HevcParserImpl::processUserDataUnregistered(std::shared_ptr<UserDataUnregis
   pSeiPayload -> user_data_payload_byte.resize(payloadSize - 16);
   for(std::size_t i=16; i<payloadSize; i++)
     pSeiPayload -> user_data_payload_byte[i-16] = bs.getBits(8);
+}
+
+void HevcParserImpl::processUserDataRegisteredItuTT35(std::shared_ptr<UserDataRegisteredItuTT35> pSeiPayload, BitstreamReader &bs, std::size_t payloadSize)
+{
+  if(payloadSize < 1)
+    return;
+
+  pSeiPayload -> country_code = bs.getBits(8);
+
+  if(pSeiPayload -> country_code == 0xFF)
+  {
+    if(payloadSize < 2)
+      return;
+    pSeiPayload -> country_code_extension_present = 1;
+    pSeiPayload -> country_code_extension_byte = bs.getBits(8);
+  }
+
+  // 中国 (CN) = 0x26，HDR Vivid 由 CUVA 组织定义
+  if(pSeiPayload -> country_code != 0x26)
+    return;
+
+  std::size_t consumedBytes = pSeiPayload -> country_code_extension_present ? 2 : 1;
+
+  if(payloadSize < consumedBytes + 2)
+    return;
+  pSeiPayload -> provider_code = bs.getBits(16);
+  consumedBytes += 2;
+
+  // CUVA = 0x0004
+  if(pSeiPayload -> provider_code != 0x0004)
+    return;
+
+  if(payloadSize < consumedBytes + 2)
+    return;
+  pSeiPayload -> provider_oriented_code = bs.getBits(16);
+  consumedBytes += 2;
+
+  // HDR Vivid oriented code = 0x0005
+  if(pSeiPayload -> provider_oriented_code != 0x0005)
+    return;
+
+  pSeiPayload -> is_cuva_hdr_vivid = 1;
+  pSeiPayload -> hdr_vivid = std::shared_ptr<HDRVivid>(new HDRVivid);
+  pSeiPayload -> hdr_vivid -> toDefault();
+
+  processHDRVivid(pSeiPayload -> hdr_vivid, bs, (payloadSize - consumedBytes) * 8);
+}
+
+void HevcParserImpl::processHDRVivid(std::shared_ptr<HDRVivid> pHdrVivid, BitstreamReader &bs, std::size_t payloadBits)
+{
+  std::size_t rem = payloadBits;
+
+  if(rem < 8)
+    return;
+  pHdrVivid -> system_start_code = bs.getBits(8);
+  rem -= 8;
+
+  if(pHdrVivid -> system_start_code < 0x01 || pHdrVivid -> system_start_code > 0x07)
+    return;
+
+  pHdrVivid -> num_windows = 1;
+  pHdrVivid -> params.resize(1);
+
+  HDRVividColorTransformParams &params = pHdrVivid -> params[0];
+
+  if(rem < 48)
+    return;
+  params.minimum_maxrgb = bs.getBits(12);
+  params.average_maxrgb = bs.getBits(12);
+  params.variance_maxrgb = bs.getBits(12);
+  params.maximum_maxrgb = bs.getBits(12);
+  rem -= 48;
+
+  if(rem < 1)
+    return;
+  params.tone_mapping_mode_flag = bs.getBits(1);
+  rem -= 1;
+
+  if(params.tone_mapping_mode_flag)
+  {
+    if(rem < 1)
+      return;
+    params.tone_mapping_param_num = bs.getBits(1) + 1;
+    rem -= 1;
+    params.tm_params.resize(params.tone_mapping_param_num);
+
+    for(uint32_t i = 0; i < params.tone_mapping_param_num; i++)
+    {
+      HDRVividColorToneMappingParams &tm = params.tm_params[i];
+
+      if(rem < 13)
+        return;
+      tm.targeted_system_display_maximum_luminance = bs.getBits(12);
+      tm.base_enable_flag = bs.getBits(1);
+      rem -= 13;
+
+      if(tm.base_enable_flag)
+      {
+        if(rem < 64)
+          return;
+        tm.base_param_m_p = bs.getBits(14);
+        tm.base_param_m_m = bs.getBits(6);
+        tm.base_param_m_a = bs.getBits(10);
+        tm.base_param_m_b = bs.getBits(10);
+        tm.base_param_m_n = bs.getBits(6);
+        tm.base_param_k1 = bs.getBits(2);
+        tm.base_param_k2 = bs.getBits(2);
+        tm.base_param_k3 = bs.getBits(4);
+        tm.base_param_Delta_enable_mode = bs.getBits(3);
+        tm.base_param_Delta = bs.getBits(7);
+        rem -= 64;
+      }
+
+      if(rem < 1)
+        return;
+      tm.three_Spline_enable_flag = bs.getBits(1);
+      rem -= 1;
+
+      if(tm.three_Spline_enable_flag)
+      {
+        if(rem < 1)
+          return;
+        tm.three_Spline_num = bs.getBits(1) + 1;
+        rem -= 1;
+        tm.three_spline.resize(tm.three_Spline_num);
+
+        for(uint32_t j = 0; j < tm.three_Spline_num; j++)
+        {
+          HDRVivid3SplineParams &spline = tm.three_spline[j];
+
+          if(rem < 2)
+            return;
+          spline.th_mode = bs.getBits(2);
+          rem -= 2;
+
+          if(spline.th_mode == 0 || spline.th_mode == 2)
+          {
+            if(rem < 8)
+              return;
+            spline.th_enable_mb = bs.getBits(8);
+            rem -= 8;
+          }
+
+          if(rem < 40)
+            return;
+          spline.th_enable = bs.getBits(12);
+          spline.th_delta1 = bs.getBits(10);
+          spline.th_delta2 = bs.getBits(10);
+          spline.enable_strength = bs.getBits(8);
+          rem -= 40;
+        }
+      }
+    }
+  }
+
+  if(rem < 1)
+    return;
+  params.color_saturation_mapping_flag = bs.getBits(1);
+  rem -= 1;
+
+  if(params.color_saturation_mapping_flag)
+  {
+    if(rem < 3)
+      return;
+    params.color_saturation_num = bs.getBits(3);
+    rem -= 3;
+    params.color_saturation_gain.resize(params.color_saturation_num);
+
+    for(uint32_t i = 0; i < params.color_saturation_num; i++)
+    {
+      if(rem < 8)
+        return;
+      params.color_saturation_gain[i] = bs.getBits(8);
+      rem -= 8;
+    }
+  }
 }
 
 void HevcParserImpl::processReserved(std::shared_ptr<SeiReservedInfo> pSeiPayload, BitstreamReader &bs, std::size_t payloadSize)

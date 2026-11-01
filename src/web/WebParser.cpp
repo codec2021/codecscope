@@ -186,6 +186,7 @@ namespace web
     m_lastSPS.reset();
     m_masteringDisplayInfo.reset();
     m_cllInfo.reset();
+    m_hdrVivid.reset();
     m_vpsMap.clear();
     m_spsMap.clear();
     m_ppsMap.clear();
@@ -474,6 +475,13 @@ namespace web
             m_masteringDisplayInfo = std::dynamic_pointer_cast<HEVC::MasteringDisplayInfo>(pSEI -> sei_message[i].sei_payload);
           else if(payloadType == HEVC::SeiMessage::CONTENT_LIGHT_LEVEL_INFO)
             m_cllInfo = std::dynamic_pointer_cast<HEVC::ContentLightLevelInfo>(pSEI -> sei_message[i].sei_payload);
+          else if(payloadType == HEVC::SeiMessage::USER_DATA_REGISTERED_ITU_T_T35)
+          {
+            std::shared_ptr<HEVC::UserDataRegisteredItuTT35> t35 =
+              std::dynamic_pointer_cast<HEVC::UserDataRegisteredItuTT35>(pSEI -> sei_message[i].sei_payload);
+            if(t35 && t35 -> is_cuva_hdr_vivid)
+              m_hdrVivid = t35 -> hdr_vivid;
+          }
         }
         break;
       }
@@ -657,6 +665,83 @@ namespace web
     }
     else
       out += ",\"hasMdi\":false";
+
+    if(m_hdrVivid)
+    {
+      out += ",\"hasHdrVivid\":true";
+      out += ",\"hdrVivid\":{";
+      out += "\"systemStartCode\":" + std::to_string(m_hdrVivid->system_start_code);
+      out += ",\"numWindows\":" + std::to_string(m_hdrVivid->num_windows);
+      out += ",\"windows\":[";
+      for(std::size_t w = 0; w < m_hdrVivid->params.size(); w++)
+      {
+        if(w)
+          out += ",";
+        const HEVC::HDRVividColorTransformParams &p = m_hdrVivid->params[w];
+        out += "{";
+        out += "\"minimumMaxrgb\":" + std::to_string(p.minimum_maxrgb);
+        out += ",\"averageMaxrgb\":" + std::to_string(p.average_maxrgb);
+        out += ",\"varianceMaxrgb\":" + std::to_string(p.variance_maxrgb);
+        out += ",\"maximumMaxrgb\":" + std::to_string(p.maximum_maxrgb);
+        out += ",\"toneMappingModeFlag\":" + std::to_string(p.tone_mapping_mode_flag);
+        out += ",\"toneMapping\":[";
+        for(std::size_t i = 0; i < p.tm_params.size(); i++)
+        {
+          if(i)
+            out += ",";
+          const HEVC::HDRVividColorToneMappingParams &tm = p.tm_params[i];
+          out += "{";
+          out += "\"targetedLuminance\":" + std::to_string(tm.targeted_system_display_maximum_luminance);
+          out += ",\"baseEnableFlag\":" + std::to_string(tm.base_enable_flag);
+          if(tm.base_enable_flag)
+          {
+            out += ",\"baseParamMP\":" + std::to_string(tm.base_param_m_p);
+            out += ",\"baseParamMM\":" + std::to_string(tm.base_param_m_m);
+            out += ",\"baseParamMA\":" + std::to_string(tm.base_param_m_a);
+            out += ",\"baseParamMB\":" + std::to_string(tm.base_param_m_b);
+            out += ",\"baseParamMN\":" + std::to_string(tm.base_param_m_n);
+            out += ",\"baseParamK1\":" + std::to_string(tm.base_param_k1);
+            out += ",\"baseParamK2\":" + std::to_string(tm.base_param_k2);
+            out += ",\"baseParamK3\":" + std::to_string(tm.base_param_k3);
+            out += ",\"baseParamDeltaEnableMode\":" + std::to_string(tm.base_param_Delta_enable_mode);
+            out += ",\"baseParamDelta\":" + std::to_string(tm.base_param_Delta);
+          }
+          out += ",\"threeSplineEnableFlag\":" + std::to_string(tm.three_Spline_enable_flag);
+          out += ",\"threeSpline\":[";
+          for(std::size_t j = 0; j < tm.three_spline.size(); j++)
+          {
+            if(j)
+              out += ",";
+            const HEVC::HDRVivid3SplineParams &sp = tm.three_spline[j];
+            out += "{";
+            out += "\"thMode\":" + std::to_string(sp.th_mode);
+            out += ",\"thEnableMb\":" + std::to_string(sp.th_enable_mb);
+            out += ",\"thEnable\":" + std::to_string(sp.th_enable);
+            out += ",\"thDelta1\":" + std::to_string(sp.th_delta1);
+            out += ",\"thDelta2\":" + std::to_string(sp.th_delta2);
+            out += ",\"enableStrength\":" + std::to_string(sp.enable_strength);
+            out += "}";
+          }
+          out += "]";
+          out += "}";
+        }
+        out += "]";
+        out += ",\"colorSaturationMappingFlag\":" + std::to_string(p.color_saturation_mapping_flag);
+        out += ",\"colorSaturationGain\":[";
+        for(std::size_t i = 0; i < p.color_saturation_gain.size(); i++)
+        {
+          if(i)
+            out += ",";
+          out += std::to_string(p.color_saturation_gain[i]);
+        }
+        out += "]";
+        out += "}";
+      }
+      out += "]";
+      out += "}";
+    }
+    else
+      out += ",\"hasHdrVivid\":false";
 
     int picW = 0, picH = 0;
     if(m_lastSPS)

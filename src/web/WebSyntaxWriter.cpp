@@ -773,6 +773,13 @@ namespace web
           createUserDataUnregistered(p, c);
           break;
         }
+        case HEVC::SeiMessage::USER_DATA_REGISTERED_ITU_T_T35:
+        {
+          std::shared_ptr<HEVC::UserDataRegisteredItuTT35> p = std::dynamic_pointer_cast<HEVC::UserDataRegisteredItuTT35>(pSEI -> sei_message[i].sei_payload);
+          SyntaxNode &c = pitem.add("user_data_registered_itu_t_t35(" + n(payloadSize) + ")");
+          createUserDataRegisteredItuTT35(p, c);
+          break;
+        }
         case HEVC::SeiMessage::SCENE_INFO:
         {
           std::shared_ptr<HEVC::SceneInfo> p = std::dynamic_pointer_cast<HEVC::SceneInfo>(pSEI -> sei_message[i].sei_payload);
@@ -1495,6 +1502,96 @@ namespace web
       }
       str += " }";
       parent.add(str);
+    }
+  }
+
+  void SyntaxWriter::createUserDataRegisteredItuTT35(std::shared_ptr<HEVC::UserDataRegisteredItuTT35> p, SyntaxNode &parent)
+  {
+    if(!p)
+      return;
+    parent.add("itu_t_t35_country_code = " + n(p->country_code));
+    if(p->country_code_extension_present)
+      parent.add("itu_t_t35_country_code_extension_byte = " + n(p->country_code_extension_byte));
+    parent.add("itu_t_t35_provider_code = " + n(p->provider_code));
+    parent.add("itu_t_t35_provider_oriented_code = " + n(p->provider_oriented_code));
+
+    if(p->is_cuva_hdr_vivid)
+    {
+      SyntaxNode &c = parent.add("hdr_vivid_dynamic_metadata");
+      createHDRVivid(p->hdr_vivid, c);
+    }
+  }
+
+  void SyntaxWriter::createHDRVivid(std::shared_ptr<HEVC::HDRVivid> p, SyntaxNode &parent)
+  {
+    if(!p)
+      return;
+    parent.add("system_start_code = " + n(p->system_start_code));
+    parent.add("num_windows = " + n(p->num_windows));
+
+    for(std::size_t w = 0; w < p->params.size(); w++)
+    {
+      const HEVC::HDRVividColorTransformParams &params = p->params[w];
+      SyntaxNode &wnd = parent.add("window(" + n(w) + ")");
+
+      wnd.add("minimum_maxrgb = " + n(params.minimum_maxrgb) + "  (den 4095)");
+      wnd.add("average_maxrgb = " + n(params.average_maxrgb) + "  (den 4095)");
+      wnd.add("variance_maxrgb = " + n(params.variance_maxrgb) + "  (den 4095)");
+      wnd.add("maximum_maxrgb = " + n(params.maximum_maxrgb) + "  (den 4095)");
+
+      wnd.add("tone_mapping_mode_flag = " + n(params.tone_mapping_mode_flag));
+      if(params.tone_mapping_mode_flag)
+      {
+        wnd.add("tone_mapping_param_num = " + n(params.tone_mapping_param_num));
+        for(std::size_t i = 0; i < params.tm_params.size(); i++)
+        {
+          const HEVC::HDRVividColorToneMappingParams &tm = params.tm_params[i];
+          SyntaxNode &tmp = wnd.add("tone_mapping_param(" + n(i) + ")");
+
+          tmp.add("targeted_system_display_maximum_luminance = " + n(tm.targeted_system_display_maximum_luminance) + "  (den 4095)");
+          tmp.add("base_enable_flag = " + n(tm.base_enable_flag));
+          if(tm.base_enable_flag)
+          {
+            tmp.add("base_param_m_p = " + n(tm.base_param_m_p) + "  (den 16383)");
+            tmp.add("base_param_m_m = " + n(tm.base_param_m_m) + "  (den 10)");
+            tmp.add("base_param_m_a = " + n(tm.base_param_m_a) + "  (den 1023)");
+            tmp.add("base_param_m_b = " + n(tm.base_param_m_b) + "  (den 1023)");
+            tmp.add("base_param_m_n = " + n(tm.base_param_m_n) + "  (den 10)");
+            tmp.add("base_param_k1 = " + n(tm.base_param_k1));
+            tmp.add("base_param_k2 = " + n(tm.base_param_k2));
+            tmp.add("base_param_k3 = " + n(tm.base_param_k3));
+            tmp.add("base_param_Delta_enable_mode = " + n(tm.base_param_Delta_enable_mode));
+            tmp.add("base_param_Delta = " + n(tm.base_param_Delta) + "  (den 127)");
+          }
+
+          tmp.add("three_Spline_enable_flag = " + n(tm.three_Spline_enable_flag));
+          if(tm.three_Spline_enable_flag)
+          {
+            tmp.add("three_Spline_num = " + n(tm.three_Spline_num));
+            for(std::size_t j = 0; j < tm.three_spline.size(); j++)
+            {
+              const HEVC::HDRVivid3SplineParams &spline = tm.three_spline[j];
+              SyntaxNode &spl = tmp.add("three_spline(" + n(j) + ")");
+
+              spl.add("th_mode = " + n(spline.th_mode));
+              if(spline.th_mode == 0 || spline.th_mode == 2)
+                spl.add("th_enable_mb = " + n(spline.th_enable_mb) + "  (den 255)");
+              spl.add("th_enable = " + n(spline.th_enable) + "  (den 4095)");
+              spl.add("th_delta1 = " + n(spline.th_delta1) + "  (den 1023)");
+              spl.add("th_delta2 = " + n(spline.th_delta2) + "  (den 1023)");
+              spl.add("enable_strength = " + n(spline.enable_strength) + "  (den 255)");
+            }
+          }
+        }
+      }
+
+      wnd.add("color_saturation_mapping_flag = " + n(params.color_saturation_mapping_flag));
+      if(params.color_saturation_mapping_flag)
+      {
+        wnd.add("color_saturation_num = " + n(params.color_saturation_num));
+        for(std::size_t i = 0; i < params.color_saturation_gain.size(); i++)
+          wnd.add("color_saturation_gain[" + n(i) + "] = " + n(params.color_saturation_gain[i]) + "  (den 128)");
+      }
     }
   }
 

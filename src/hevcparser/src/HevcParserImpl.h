@@ -42,6 +42,8 @@ namespace HEVC
 
       void processDecodedPictureHash(std::shared_ptr<DecodedPictureHash> pdecPicHash, BitstreamReader &bs);
       void processUserDataUnregistered(std::shared_ptr<UserDataUnregistered> pSeiPayload, BitstreamReader &bs, std::size_t payloadSize);
+      void processUserDataRegisteredItuTT35(std::shared_ptr<UserDataRegisteredItuTT35> pSeiPayload, BitstreamReader &bs, std::size_t payloadSize);
+      void processHDRVivid(std::shared_ptr<HDRVivid> pHdrVivid, BitstreamReader &bs, std::size_t payloadBits);
       void processReserved(std::shared_ptr<SeiReservedInfo> pSeiPayload, BitstreamReader &bs, std::size_t payloadSize);
       void processSceneInfo(std::shared_ptr<SceneInfo> pSeiPayload, BitstreamReader &bs);
       void processFullFrameSnapshot(std::shared_ptr<FullFrameSnapshot> pSeiPayload, BitstreamReader &bs);

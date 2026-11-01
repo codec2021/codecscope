@@ -38,6 +38,8 @@
   var exportBtn = document.getElementById("exportBtn");
   var mediaInfoView = document.getElementById("mediaInfoView");
   var hexView = document.getElementById("hexView");
+  var hexDump = document.getElementById("hexDump");
+  var hexInspector = document.getElementById("hexInspector");
   var bitrateView = document.getElementById("bitrateView");
   var hdrInfo = document.getElementById("hdrInfo");
   var warningBody = document.getElementById("warningBody");
@@ -739,27 +741,121 @@
   }
 
   // Hex 视图
+  var hexSelStart = -1, hexSelEnd = -1, hexDragging = false;
+
   function renderHex(index) {
     var nal = currentData.nalus[index];
-    if (!fileBytes || nal.length <= 0) { hexView.textContent = "No data"; return; }
+    hexSelStart = hexSelEnd = -1;
+    hexInspector.innerHTML = "";
+    if (!fileBytes || nal.length <= 0) { hexDump.textContent = "No data"; return; }
     var end = Math.min(nal.offset + nal.length, fileBytes.length);
     var out = "";
     for (var i = nal.offset; i < end; i += 16) {
-      var lineHex = "", lineAscii = "";
+      var lineHex = '<span class="hex-offset">' + hex8(i) + "</span>  ";
+      var asciiStr = "";
       for (var j = 0; j < 16; j++) {
         if (i + j < end) {
           var b = fileBytes[i + j];
-          lineHex += (b < 16 ? "0" : "") + b.toString(16) + " ";
-          lineAscii += (b >= 32 && b <= 126) ? String.fromCharCode(b) : ".";
+          lineHex += '<span class="hb" data-i="' + (i + j) + '">' + (b < 16 ? "0" : "") + b.toString(16) + "</span>";
+          asciiStr += (b >= 32 && b <= 126) ? String.fromCharCode(b) : ".";
         } else {
-          lineHex += "   ";
+          lineHex += '<span class="hb hb-pad"></span>';
+          asciiStr += " ";
         }
       }
-      out += '<span class="hex-offset">' + hex8(i) + "</span>  " +
-             '<span class="hex-byte">' + lineHex + "</span>" +
-             '<span class="hex-ascii">|' + lineAscii + "|</span>\n";
+      out += lineHex + ' <span class="hex-ascii">|' + asciiStr + "|</span>\n";
     }
-    hexView.innerHTML = out;
+    hexDump.innerHTML = out;
+  }
+
+  function updateHexSelection() {
+    var s = Math.min(hexSelStart, hexSelEnd);
+    var e = Math.max(hexSelStart, hexSelEnd);
+    var els = hexDump.querySelectorAll(".hb");
+    for (var i = 0; i < els.length; i++) {
+      var off = parseInt(els[i].dataset.i, 10);
+      els[i].classList.toggle("sel", off >= s && off <= e);
+    }
+  }
+
+  function hexInterpretBytes(bytes) {
+    function u8(off) { return bytes[off]; }
+    function num2(le) { return le ? u8(0) | (u8(1) << 8) : (u8(0) << 8) | u8(1); }
+    function num4(le) { var v = 0; for (var i = 0; i < 4; i++) v = v * 256 + u8(le ? 3 - i : i); return v >>> 0; }
+    function s4(le) { var v = num4(le); return v > 0x7fffffff ? v - 0x100000000 : v; }
+    function f4(le) { var b = new Uint8Array(4); for (var i = 0; i < 4; i++) b[i] = u8(i); return new DataView(b.buffer).getFloat32(0, le); }
+    function f8(le) { var b = new Uint8Array(8); for (var i = 0; i < 8; i++) b[i] = u8(i); return new DataView(b.buffer).getFloat64(0, le); }
+    function u64(le) {
+      if (typeof BigInt === "undefined") return "—";
+      var v = 0n;
+      for (var i = 0; i < 8; i++) v = (v << 8n) | BigInt(u8(le ? 7 - i : i));
+      return v.toString();
+    }
+    function s64(le) {
+      if (typeof BigInt === "undefined") return "—";
+      var v = 0n;
+      for (var i = 0; i < 8; i++) v = (v << 8n) | BigInt(u8(le ? 7 - i : i));
+      var m = 1n << 63n;
+      return (v >= m ? v - (1n << 64n) : v).toString();
+    }
+    var n = bytes.length;
+    var out = [];
+    out.push("U8", bytes.join(", "));
+    out.push("I8", Array.prototype.map.call(bytes, function (b) { return b > 127 ? b - 256 : b; }).join(", "));
+    if (n === 1) out.push("Bits", u8(0).toString(2).padStart(8, "0"));
+    if (n >= 2) {
+      out.push("U16 LE", num2(true));
+      out.push("U16 BE", num2(false));
+      out.push("I16 LE", num2(true) > 32767 ? num2(true) - 65536 : num2(true));
+      out.push("I16 BE", num2(false) > 32767 ? num2(false) - 65536 : num2(false));
+    }
+    if (n >= 4) {
+      out.push("U32 LE", num4(true));
+      out.push("U32 BE", num4(false));
+      out.push("I32 LE", s4(true));
+      out.push("I32 BE", s4(false));
+      out.push("F32 LE", f4(true));
+      out.push("F32 BE", f4(false));
+    }
+    if (n >= 8) {
+      out.push("U64 LE", u64(true));
+      out.push("U64 BE", u64(false));
+      out.push("I64 LE", s64(true));
+      out.push("I64 BE", s64(false));
+      out.push("F64 LE", f8(true));
+      out.push("F64 BE", f8(false));
+    }
+    return out;
+  }
+
+  function renderHexInspector() {
+    if (hexSelStart < 0 || hexSelEnd < 0) { hexInspector.innerHTML = ""; return; }
+    var s = Math.min(hexSelStart, hexSelEnd);
+    var e = Math.max(hexSelStart, hexSelEnd);
+    var n = e - s + 1;
+    var bytes = [];
+    for (var i = s; i <= e; i++) bytes.push(fileBytes[i]);
+    var hexStr = "", asciiStr = "";
+    for (var i = 0; i < n; i++) {
+      var b = bytes[i];
+      hexStr += (b < 16 ? "0" : "") + b.toString(16) + " ";
+      asciiStr += (b >= 32 && b <= 126) ? String.fromCharCode(b) : ".";
+    }
+    var html = '<div class="hi-range">0x' + hex8(s) + " .. 0x" + hex8(e) + "  (" + n + " byte" + (n > 1 ? "s" : "") + ")</div>";
+    html += '<div class="hi-row"><span class="hi-label">Hex</span><span class="hi-val">' + hexStr + "</span></div>";
+    html += '<div class="hi-row"><span class="hi-label">ASCII</span><span class="hi-val">' + asciiStr + "</span></div>";
+    var interp = hexInterpretBytes(bytes);
+    for (var i = 0; i < interp.length; i += 2) {
+      html += '<div class="hi-row"><span class="hi-label">' + interp[i] + '</span><span class="hi-val">' + interp[i + 1] + "</span></div>";
+    }
+    hexInspector.innerHTML = html;
+  }
+
+  function hexDumpByte(e) {
+    var t = e.target;
+    while (t && t !== hexDump && !(t.classList && t.classList.contains("hb"))) t = t.parentNode;
+    if (!t || t === hexDump) return -1;
+    return parseInt(t.dataset.i, 10);
   }
 
   // 码率视图：每帧字节大小柱状图 + 统计
@@ -2238,6 +2334,7 @@ timeline.addEventListener("click", function (e) {
       d.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + "</span>";
       hdrInfo.appendChild(d);
     }
+    function frac(n, d) { return n + "/" + d + " (" + (n / d).toFixed(4) + ")"; }
     row("Colour primaries", h.colourPrimaries);
     row("Transfer characteristics", h.transferCharacteristics);
     row("Matrix coefficients", h.matrixCoefficients);
@@ -2248,6 +2345,37 @@ timeline.addEventListener("click", function (e) {
     row("Full range", h.fullRange);
     if (h.hasCll) { row("Max CLL", h.maxCll); row("Avg CLL", h.avgCll); }
     if (h.hasMdi) row("Mastering display", h.masteringDisplay);
+    if (h.hasHdrVivid && h.hdrVivid) {
+      var hv = h.hdrVivid;
+      row("HDR Vivid (CUVA 005.1)", "present (system_start_code=" + hv.systemStartCode + ", windows=" + hv.numWindows + ")");
+      (hv.windows || []).forEach(function (w, wi) {
+        var prefix = hv.numWindows > 1 ? "  win" + wi + " " : "  ";
+        row(prefix + "maxRGB min/avg/var/max",
+          frac(w.minimumMaxrgb, 4095) + "  " + frac(w.averageMaxrgb, 4095) + "  " +
+          frac(w.varianceMaxrgb, 4095) + "  " + frac(w.maximumMaxrgb, 4095));
+        (w.toneMapping || []).forEach(function (tm, ti) {
+          var tp = prefix + "  TM" + ti + " target luminance";
+          row(tp, frac(tm.targetedLuminance, 4095) + " (" + (tm.targetedLuminance / 4095 * 10000).toFixed(0) + " nit)");
+          if (tm.baseEnableFlag) {
+            row(prefix + "  TM" + ti + " base m_p/m_m/m_a/m_b/m_n",
+              frac(tm.baseParamMP, 16383) + " " + frac(tm.baseParamMM, 10) + " " +
+              frac(tm.baseParamMA, 1023) + " " + frac(tm.baseParamMB, 1023) + " " + frac(tm.baseParamMN, 10));
+            row(prefix + "  TM" + ti + " base k1/k2/k3/delta",
+              tm.baseParamK1 + "/" + tm.baseParamK2 + "/" + tm.baseParamK3 + "  delta=" +
+              frac(tm.baseParamDelta, 127) + " mode=" + tm.baseParamDeltaEnableMode);
+          }
+          (tm.threeSpline || []).forEach(function (sp, si) {
+            row(prefix + "  TM" + ti + " 3Spline" + si + " th_enable/d1/d2/str",
+              frac(sp.thEnable, 4095) + " " + frac(sp.thDelta1, 1023) + " " +
+              frac(sp.thDelta2, 1023) + " " + frac(sp.enableStrength, 255) + "  mode=" + sp.thMode);
+          });
+        });
+        if (w.colorSaturationMappingFlag) {
+          row(prefix + "  color saturation gain",
+            (w.colorSaturationGain || []).map(function (g) { return frac(g, 128); }).join("  "));
+        }
+      });
+    }
   }
 
   function renderWarnings() {
@@ -2371,6 +2499,31 @@ timeline.addEventListener("click", function (e) {
   tabHex.addEventListener("click", function () { showTab("hex"); });
   tabBitrate.addEventListener("click", function () { showTab("bitrate"); });
   tabMediaInfo.addEventListener("click", function () { showTab("mediainfo"); });
+
+  // Hex 视图字节选择（类似 imhex 的选中显示解释）
+  hexDump.addEventListener("mousedown", function (e) {
+    var off = hexDumpByte(e);
+    if (off < 0) return;
+    hexDragging = true;
+    hexSelStart = hexSelEnd = off;
+    updateHexSelection();
+    renderHexInspector();
+    e.preventDefault();
+  });
+  hexDump.addEventListener("mousemove", function (e) {
+    if (!hexDragging) return;
+    var off = hexDumpByte(e);
+    if (off < 0) return;
+    hexSelEnd = off;
+    updateHexSelection();
+    renderHexInspector();
+  });
+  document.addEventListener("mouseup", function () {
+    if (hexDragging) {
+      hexDragging = false;
+      renderHexInspector();
+    }
+  });
 
   previewPlayBtn.addEventListener("click", function () { startPlayback(); });
   previewPrevBtn.addEventListener("click", function () { stepFrame(-1); });
@@ -2883,7 +3036,8 @@ timeline.addEventListener("click", function (e) {
     bottomPanels.classList.add("hidden");
     resetBtn.classList.add("hidden");
 
-    hexView.innerHTML = "";
+    hexDump.innerHTML = "";
+    hexInspector.innerHTML = "";
     showTab("syntax");
 
     setStatus("Parser ready (H.264/H.265/H.266). Open or drop a bitstream file.");

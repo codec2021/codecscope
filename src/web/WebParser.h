@@ -83,6 +83,7 @@ namespace web
       std::shared_ptr<HEVC::SPS>                    m_lastSPS;
       std::shared_ptr<HEVC::MasteringDisplayInfo>   m_masteringDisplayInfo;
       std::shared_ptr<HEVC::ContentLightLevelInfo>  m_cllInfo;
+      std::shared_ptr<HEVC::HDRVivid>               m_hdrVivid;
 
       std::map<uint32_t, std::shared_ptr<HEVC::VPS> > m_vpsMap;
       std::map<uint32_t, std::shared_ptr<HEVC::SPS> > m_spsMap;

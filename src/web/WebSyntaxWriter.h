@@ -43,6 +43,8 @@ namespace web
 
       void createDecodedPictureHash(std::shared_ptr<HEVC::DecodedPictureHash> pDecPictHash, SyntaxNode &parent);
       void createUserDataUnregistered(std::shared_ptr<HEVC::UserDataUnregistered> pSei, SyntaxNode &parent);
+      void createUserDataRegisteredItuTT35(std::shared_ptr<HEVC::UserDataRegisteredItuTT35> pSei, SyntaxNode &parent);
+      void createHDRVivid(std::shared_ptr<HEVC::HDRVivid> pHdrVivid, SyntaxNode &parent);
       void createReserved(std::shared_ptr<HEVC::SeiReservedInfo> pSei, SyntaxNode &parent);
       void createSceneInfo(std::shared_ptr<HEVC::SceneInfo> pSei, SyntaxNode &parent);
       void createFullFrameSnapshot(std::shared_ptr<HEVC::FullFrameSnapshot> pSei, SyntaxNode &parent);

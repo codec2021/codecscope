@@ -310,7 +310,135 @@ namespace HEVC
 
     void toDefault() {};
   };
-  
+
+  // HDR Vivid (CUVA 005.1:2021) 动态元数据，承载于 user_data_registered_itu_t_t35
+  class HDRVivid3SplineParams
+  {
+  public:
+    uint32_t                              th_mode;
+    uint32_t                              th_enable_mb;
+    uint32_t                              th_enable;
+    uint32_t                              th_delta1;
+    uint32_t                              th_delta2;
+    uint32_t                              enable_strength;
+
+    void toDefault()
+    {
+      th_mode = 0;
+      th_enable_mb = 0;
+      th_enable = 0;
+      th_delta1 = 0;
+      th_delta2 = 0;
+      enable_strength = 0;
+    }
+  };
+
+  class HDRVividColorToneMappingParams
+  {
+  public:
+    uint32_t                              targeted_system_display_maximum_luminance;
+    uint8_t                               base_enable_flag;
+    uint32_t                              base_param_m_p;
+    uint32_t                              base_param_m_m;
+    uint32_t                              base_param_m_a;
+    uint32_t                              base_param_m_b;
+    uint32_t                              base_param_m_n;
+    uint32_t                              base_param_k1;
+    uint32_t                              base_param_k2;
+    uint32_t                              base_param_k3;
+    uint32_t                              base_param_Delta_enable_mode;
+    uint32_t                              base_param_Delta;
+    uint8_t                               three_Spline_enable_flag;
+    uint32_t                              three_Spline_num;
+    std::vector<HDRVivid3SplineParams>    three_spline;
+
+    void toDefault()
+    {
+      targeted_system_display_maximum_luminance = 0;
+      base_enable_flag = 0;
+      base_param_m_p = 0;
+      base_param_m_m = 0;
+      base_param_m_a = 0;
+      base_param_m_b = 0;
+      base_param_m_n = 0;
+      base_param_k1 = 0;
+      base_param_k2 = 0;
+      base_param_k3 = 0;
+      base_param_Delta_enable_mode = 0;
+      base_param_Delta = 0;
+      three_Spline_enable_flag = 0;
+      three_Spline_num = 0;
+      three_spline.clear();
+    }
+  };
+
+  class HDRVividColorTransformParams
+  {
+  public:
+    uint32_t                              minimum_maxrgb;
+    uint32_t                              average_maxrgb;
+    uint32_t                              variance_maxrgb;
+    uint32_t                              maximum_maxrgb;
+    uint8_t                               tone_mapping_mode_flag;
+    uint32_t                              tone_mapping_param_num;
+    std::vector<HDRVividColorToneMappingParams> tm_params;
+    uint8_t                               color_saturation_mapping_flag;
+    uint32_t                              color_saturation_num;
+    std::vector<uint32_t>                 color_saturation_gain;
+
+    void toDefault()
+    {
+      minimum_maxrgb = 0;
+      average_maxrgb = 0;
+      variance_maxrgb = 0;
+      maximum_maxrgb = 0;
+      tone_mapping_mode_flag = 0;
+      tone_mapping_param_num = 0;
+      tm_params.clear();
+      color_saturation_mapping_flag = 0;
+      color_saturation_num = 0;
+      color_saturation_gain.clear();
+    }
+  };
+
+  class HDRVivid: public SeiPayload
+  {
+  public:
+    uint8_t                               system_start_code;
+    uint32_t                              num_windows;
+    std::vector<HDRVividColorTransformParams> params;
+
+    void toDefault()
+    {
+      system_start_code = 0;
+      num_windows = 0;
+      params.clear();
+    }
+  };
+
+  class UserDataRegisteredItuTT35: public SeiPayload
+  {
+  public:
+    uint8_t                               country_code;
+    uint8_t                               country_code_extension_byte;
+    uint8_t                               country_code_extension_present;
+    uint16_t                              provider_code;
+    uint16_t                              provider_oriented_code;
+    uint8_t                               is_cuva_hdr_vivid;
+    std::shared_ptr<HDRVivid>             hdr_vivid;
+
+    void toDefault()
+    {
+      country_code = 0;
+      country_code_extension_byte = 0;
+      country_code_extension_present = 0;
+      provider_code = 0;
+      provider_oriented_code = 0;
+      is_cuva_hdr_vivid = 0;
+      hdr_vivid.reset();
+    }
+  };
+
   class SceneInfo: public SeiPayload
   {
   public:
