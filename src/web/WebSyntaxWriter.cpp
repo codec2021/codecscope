@@ -3,6 +3,7 @@
 #include <HevcUtils.h>
 
 #include <algorithm>
+#include <iomanip>
 #include <sstream>
 
 namespace web
@@ -15,6 +16,13 @@ namespace web
     std::string n(uint8_t v)  { return std::to_string((int)v); }
     std::string n(uint16_t v) { return std::to_string(v); }
     std::string n(std::size_t v) { return std::to_string(v); }
+
+    std::string frac(uint32_t num, uint32_t den)
+    {
+      std::stringstream ss;
+      ss << num << "/" << den << " = " << std::fixed << std::setprecision(4) << ((double)num / (double)den);
+      return ss.str();
+    }
 
     std::string hex2Upper(uint8_t v)
     {
@@ -1534,10 +1542,10 @@ namespace web
       const HEVC::HDRVividColorTransformParams &params = p->params[w];
       SyntaxNode &wnd = parent.add("window(" + n(w) + ")");
 
-      wnd.add("minimum_maxrgb = " + n(params.minimum_maxrgb) + "  (den 4095)");
-      wnd.add("average_maxrgb = " + n(params.average_maxrgb) + "  (den 4095)");
-      wnd.add("variance_maxrgb = " + n(params.variance_maxrgb) + "  (den 4095)");
-      wnd.add("maximum_maxrgb = " + n(params.maximum_maxrgb) + "  (den 4095)");
+      wnd.add("minimum_maxrgb = " + frac(params.minimum_maxrgb, 4095));
+      wnd.add("average_maxrgb = " + frac(params.average_maxrgb, 4095));
+      wnd.add("variance_maxrgb = " + frac(params.variance_maxrgb, 4095));
+      wnd.add("maximum_maxrgb = " + frac(params.maximum_maxrgb, 4095));
 
       wnd.add("tone_mapping_mode_flag = " + n(params.tone_mapping_mode_flag));
       if(params.tone_mapping_mode_flag)
@@ -1548,20 +1556,22 @@ namespace web
           const HEVC::HDRVividColorToneMappingParams &tm = params.tm_params[i];
           SyntaxNode &tmp = wnd.add("tone_mapping_param(" + n(i) + ")");
 
-          tmp.add("targeted_system_display_maximum_luminance = " + n(tm.targeted_system_display_maximum_luminance) + "  (den 4095)");
+          std::stringstream nit;
+          nit << std::fixed << std::setprecision(0) << ((double)tm.targeted_system_display_maximum_luminance / 4095.0 * 10000.0);
+          tmp.add("targeted_system_display_maximum_luminance = " + frac(tm.targeted_system_display_maximum_luminance, 4095) + "  (" + nit.str() + " nit)");
           tmp.add("base_enable_flag = " + n(tm.base_enable_flag));
           if(tm.base_enable_flag)
           {
-            tmp.add("base_param_m_p = " + n(tm.base_param_m_p) + "  (den 16383)");
-            tmp.add("base_param_m_m = " + n(tm.base_param_m_m) + "  (den 10)");
-            tmp.add("base_param_m_a = " + n(tm.base_param_m_a) + "  (den 1023)");
-            tmp.add("base_param_m_b = " + n(tm.base_param_m_b) + "  (den 1023)");
-            tmp.add("base_param_m_n = " + n(tm.base_param_m_n) + "  (den 10)");
+            tmp.add("base_param_m_p = " + frac(tm.base_param_m_p, 16383));
+            tmp.add("base_param_m_m = " + frac(tm.base_param_m_m, 10));
+            tmp.add("base_param_m_a = " + frac(tm.base_param_m_a, 1023));
+            tmp.add("base_param_m_b = " + frac(tm.base_param_m_b, 1023));
+            tmp.add("base_param_m_n = " + frac(tm.base_param_m_n, 10));
             tmp.add("base_param_k1 = " + n(tm.base_param_k1));
             tmp.add("base_param_k2 = " + n(tm.base_param_k2));
             tmp.add("base_param_k3 = " + n(tm.base_param_k3));
             tmp.add("base_param_Delta_enable_mode = " + n(tm.base_param_Delta_enable_mode));
-            tmp.add("base_param_Delta = " + n(tm.base_param_Delta) + "  (den 127)");
+            tmp.add("base_param_Delta = " + frac(tm.base_param_Delta, 127));
           }
 
           tmp.add("three_Spline_enable_flag = " + n(tm.three_Spline_enable_flag));
@@ -1575,11 +1585,11 @@ namespace web
 
               spl.add("th_mode = " + n(spline.th_mode));
               if(spline.th_mode == 0 || spline.th_mode == 2)
-                spl.add("th_enable_mb = " + n(spline.th_enable_mb) + "  (den 255)");
-              spl.add("th_enable = " + n(spline.th_enable) + "  (den 4095)");
-              spl.add("th_delta1 = " + n(spline.th_delta1) + "  (den 1023)");
-              spl.add("th_delta2 = " + n(spline.th_delta2) + "  (den 1023)");
-              spl.add("enable_strength = " + n(spline.enable_strength) + "  (den 255)");
+                spl.add("th_enable_mb = " + frac(spline.th_enable_mb, 255));
+              spl.add("th_enable = " + frac(spline.th_enable, 4095));
+              spl.add("th_delta1 = " + frac(spline.th_delta1, 1023));
+              spl.add("th_delta2 = " + frac(spline.th_delta2, 1023));
+              spl.add("enable_strength = " + frac(spline.enable_strength, 255));
             }
           }
         }
@@ -1590,7 +1600,7 @@ namespace web
       {
         wnd.add("color_saturation_num = " + n(params.color_saturation_num));
         for(std::size_t i = 0; i < params.color_saturation_gain.size(); i++)
-          wnd.add("color_saturation_gain[" + n(i) + "] = " + n(params.color_saturation_gain[i]) + "  (den 128)");
+          wnd.add("color_saturation_gain[" + n(i) + "] = " + frac(params.color_saturation_gain[i], 128));
       }
     }
   }
