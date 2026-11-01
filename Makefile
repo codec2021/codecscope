@@ -1,5 +1,5 @@
 CXX ?= clang++
-CXXFLAGS ?= -std=c++11 -O2 -Wall
+CXXFLAGS ?= -std=c++11 -O2 -Wall -MMD -MP
 EMCC ?= em++
 
 INC := -Isrc/hevcparser/include -Isrc/hevcparser/src -Isrc/h264parser/include -Isrc/h264parser/src -Isrc/vvcparser/include -Isrc/vvcparser/src -Isrc/common -Isrc/web
@@ -12,6 +12,7 @@ WEB_SRC := $(wildcard src/web/*.cpp)
 
 NATIVE_SRC := $(PARSER_SRC) $(AVC_SRC) $(VVC_SRC) $(COMMON_SRC) $(WEB_SRC) src/native_main.cpp
 NATIVE_OBJ := $(NATIVE_SRC:.cpp=.o)
+NATIVE_DEPS := $(NATIVE_OBJ:.o=.d)
 
 .PHONY: all native wasm clean
 
@@ -41,5 +42,7 @@ wasm:
 	cp -r www/js dist/ 2>/dev/null || true
 
 clean:
-	rm -f $(NATIVE_OBJ) hevcparser_native
+	rm -f $(NATIVE_OBJ) $(NATIVE_DEPS) hevcparser_native
 	rm -rf dist
+
+-include $(NATIVE_DEPS)
