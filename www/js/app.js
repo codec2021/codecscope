@@ -518,193 +518,6 @@
     }
   }
 
-  // ---------- 导出报告 ----------
-  function dumpSyntaxText(node, lines, depth) {
-    if (!node) return;
-    var pad = "";
-    for (var d = 0; d < depth; d++) pad += "  ";
-    lines.push(pad + node.n);
-    if (node.c) for (var c = 0; c < node.c.length; c++) dumpSyntaxText(node.c[c], lines, depth + 1);
-  }
-
-  function buildReport() {
-    if (!currentData) return null;
-    var si = currentData.streamInfo;
-    var hdr = currentData.hdr || {};
-    var L = [];
-    L.push("# CodecScope Analysis Report");
-    L.push("");
-    L.push("## File");
-    L.push("- Name: " + fileNameEl.textContent);
-    L.push("- Codec: " + codecFullName() + " (" + currentCodec + ")");
-    L.push("- NAL units: " + si.nalus);
-    L.push("- Slices: " + si.slices);
-    L.push("- I/P/B: " + si.i + " / " + si.p + " / " + si.b);
-    L.push("- Profile: " + si.profile + "  Level: " + si.level);
-    var w = si.picWidth || hdr.picWidth;
-    var h = si.picHeight || hdr.picHeight;
-    if (w) L.push("- Resolution: " + w + " x " + h);
-    if (si.fps && parseFloat(si.fps) > 0) L.push("- FPS: " + si.fps);
-    if (si.bitDepth !== undefined) L.push("- Bit depth: " + si.bitDepth);
-    if (si.chromaFormat !== undefined) L.push("- Chroma: " + chromaFormatName(si.chromaFormat));
-    L.push("");
-
-    L.push("## NAL Type Distribution");
-    var dist = {};
-    for (var i = 0; i < currentData.nalus.length; i++) {
-      var tn = currentData.nalus[i].typeName;
-      dist[tn] = (dist[tn] || 0) + 1;
-    }
-    Object.keys(dist).sort().forEach(function (t) { L.push("- " + t + ": " + dist[t]); });
-    L.push("");
-
-    L.push("## NAL Unit List");
-    L.push("");
-    L.push("| # | Offset | Length | Type | Frame | Info |");
-    L.push("| --- | --- | --- | --- | --- | --- |");
-    for (var j = 0; j < currentData.nalus.length; j++) {
-      var n = currentData.nalus[j];
-      var info = (n.info || "").replace(/\|/g, "\\|");
-      var fr = (n.frameIdx !== undefined && n.frameIdx >= 0) ? String(n.frameIdx) : "";
-      L.push("| " + j + " | " + hex8(n.offset) + " | " + n.length + " | " + n.typeName + " | " + fr + " | " + info + " |");
-    }
-    L.push("");
-
-    if (selectedIndex >= 0 && selectedIndex < currentData.nalus.length) {
-      L.push("## Syntax Tree (NAL #" + selectedIndex + " " + currentData.nalus[selectedIndex].typeName + ")");
-      L.push("```");
-      var node = currentData.nalus[selectedIndex].jpegSyntax || fetchNalSyntax(selectedIndex);
-      dumpSyntaxText(node, L, 0);
-      L.push("```");
-    }
-    return L.join("\n");
-  }
-
-  function exportReport() {
-    var text = buildReport();
-    if (text == null) { setStatus("Nothing to export"); return; }
-    var base = (fileNameEl.textContent || "report").replace(/\s*\([\d.]+ MB\)$/, "").replace(/\.[^.]+$/, "");
-    var blob = new Blob([text], { type: "text/markdown" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = base + ".md";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-  }
-
-  // ---------- 文件对比 ----------
-  function codecNameOf(codec) {
-    if (codec === "avc") return "H.264 / AVC";
-    if (codec === "hevc") return "H.265 / HEVC";
-    if (codec === "vvc") return "H.266 / VVC";
-    if (codec === "av1") return "AV1";
-    if (codec === "vp9") return "VP9";
-    return codec || "?";
-  }
-
-  function parseForCompare(rawBytes) {
-    var fileBytes = null, hintCodec = null, containerInfo = null;
-    if (H26xDemux.isMp4(rawBytes)) {
-      var m = H26xDemux.demuxMp4(rawBytes);
-      if (!m || !m.annexb || !m.annexb.length) return null;
-      fileBytes = m.annexb; hintCodec = m.codec;
-      containerInfo = H26xDemux.parseContainerInfo(rawBytes);
-    } else if (H26xDemux.isTs(rawBytes)) {
-      var t = H26xDemux.demuxTs(rawBytes);
-      if (!t || !t.annexb || !t.annexb.length) return null;
-      fileBytes = t.annexb; hintCodec = t.codec;
-      containerInfo = H26xDemux.parseTsInfo(rawBytes);
-    } else if (H26xDemux.isFlv(rawBytes)) {
-      var f = H26xDemux.demuxFlv(rawBytes);
-      if (!f || !f.annexb || !f.annexb.length) return null;
-      fileBytes = f.annexb; hintCodec = f.codec;
-    } else if (H26xDemux.isWebm(rawBytes) || H26xDemux.isIvf(rawBytes) || H26xDemux.isAv1AnnexB(rawBytes)) {
-      var av = H26xDemux.isWebm(rawBytes) ? H26xDemux.demuxWebm(rawBytes) : H26xDemux.parseIvf(rawBytes);
-      if (!av || !av.frames || !av.frames.length) return null;
-      var units = av.units || av.obus || [];
-      return {
-        codec: av.codec,
-        data: {
-          streamInfo: { nalus: units.length, slices: av.frames.length, i: av.frames.length, p: 0, b: 0, profile: (av.codec === "vp9" ? "VP9" : "AV1"), level: "-", picWidth: av.width, picHeight: av.height },
-          nalus: units.map(function (u) { return { type: u.type, typeName: u.typeName }; }),
-          hdr: {}
-        },
-        containerInfo: null
-      };
-    } else {
-      fileBytes = rawBytes;
-    }
-    if (!fileBytes || fileBytes.length === 0) return null;
-    try {
-      var r = parseBuffer(fileBytes, hintCodec);
-      return { codec: r.codec, data: r.data, containerInfo: containerInfo };
-    } catch (e) { return null; }
-  }
-
-  function nalDist(data) {
-    var dist = {};
-    for (var i = 0; i < data.nalus.length; i++) {
-      var t = data.nalus[i].typeName || ("type" + data.nalus[i].type);
-      dist[t] = (dist[t] || 0) + 1;
-    }
-    return dist;
-  }
-  function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-  function compareRow(label, a, b) {
-    var same = String(a) === String(b);
-    var cls = same ? "same" : "diff";
-    return '<tr><th>' + escHtml(label) + '</th><td class="' + cls + '">' + escHtml(a) + '</td><td class="' + cls + '">' + escHtml(b) + '</td></tr>';
-  }
-
-  function showCompare(b) {
-    var a = currentData;
-    var siA = a.streamInfo, siB = b.data.streamInfo;
-    var wA = siA.picWidth || (a.hdr && a.hdr.picWidth);
-    var hA = siA.picHeight || (a.hdr && a.hdr.picHeight);
-    var wB = siB.picWidth || (b.data.hdr && b.data.hdr.picWidth);
-    var hB = siB.picHeight || (b.data.hdr && b.data.hdr.picHeight);
-    var html = '<table class="compare-table">';
-    html += '<tr><th></th><th>File A</th><th>File B</th></tr>';
-    html += compareRow("Codec", codecNameOf(currentCodec), codecNameOf(b.codec));
-    html += compareRow("NAL units", siA.nalus, siB.nalus);
-    html += compareRow("Slices", siA.slices, siB.slices);
-    html += compareRow("I / P / B", siA.i + "/" + siA.p + "/" + siA.b, siB.i + "/" + siB.p + "/" + siB.b);
-    html += compareRow("Profile", siA.profile, siB.profile);
-    html += compareRow("Level", siA.level, siB.level);
-    html += compareRow("Resolution", (wA ? wA + "x" + hA : "?"), (wB ? wB + "x" + hB : "?"));
-    html += compareRow("FPS", siA.fps, siB.fps);
-    html += compareRow("Bit depth", siA.bitDepth, siB.bitDepth);
-    html += compareRow("Chroma", siA.chromaFormat !== undefined ? chromaFormatName(siA.chromaFormat) : "?", siB.chromaFormat !== undefined ? chromaFormatName(siB.chromaFormat) : "?");
-    html += '</table>';
-
-    var distA = nalDist(a), distB = nalDist(b.data);
-    var typeKeys = {};
-    Object.keys(distA).forEach(function (t) { typeKeys[t] = 1; });
-    Object.keys(distB).forEach(function (t) { typeKeys[t] = 1; });
-    var keys = Object.keys(typeKeys).sort();
-    html += '<h4 style="margin:14px 0 6px">NAL Type Distribution</h4>';
-    html += '<table class="compare-table">';
-    html += '<tr><th>NAL Type</th><th>File A</th><th>File B</th></tr>';
-    keys.forEach(function (t) { html += compareRow(t, distA[t] || 0, distB[t] || 0); });
-    html += '</table>';
-
-    compareBody.innerHTML = html;
-    compareModal.classList.remove("hidden");
-  }
-
-  function doCompare(file) {
-    var reader = new FileReader();
-    reader.onload = function (e) {
-      var b = parseForCompare(new Uint8Array(e.target.result));
-      if (!b) { setStatus("Compare: cannot parse second file"); return; }
-      showCompare(b);
-    };
-    reader.readAsArrayBuffer(file);
-  }
-
   function buildTree(node) {
     var container = document.createElement("div");
     container.className = "tree-node";
@@ -738,124 +551,6 @@
       });
     }
     return container;
-  }
-
-  // Hex 视图
-  var hexSelStart = -1, hexSelEnd = -1, hexDragging = false;
-
-  function renderHex(index) {
-    var nal = currentData.nalus[index];
-    hexSelStart = hexSelEnd = -1;
-    hexInspector.innerHTML = "";
-    if (!fileBytes || nal.length <= 0) { hexDump.textContent = "No data"; return; }
-    var end = Math.min(nal.offset + nal.length, fileBytes.length);
-    var out = "";
-    for (var i = nal.offset; i < end; i += 16) {
-      var lineHex = '<span class="hex-offset">' + hex8(i) + "</span>  ";
-      var asciiStr = "";
-      for (var j = 0; j < 16; j++) {
-        if (i + j < end) {
-          var b = fileBytes[i + j];
-          lineHex += '<span class="hb" data-i="' + (i + j) + '">' + (b < 16 ? "0" : "") + b.toString(16) + "</span>";
-          asciiStr += (b >= 32 && b <= 126) ? String.fromCharCode(b) : ".";
-        } else {
-          lineHex += '<span class="hb hb-pad"></span>';
-          asciiStr += " ";
-        }
-      }
-      out += lineHex + ' <span class="hex-ascii">|' + asciiStr + "|</span>\n";
-    }
-    hexDump.innerHTML = out;
-  }
-
-  function updateHexSelection() {
-    var s = Math.min(hexSelStart, hexSelEnd);
-    var e = Math.max(hexSelStart, hexSelEnd);
-    var els = hexDump.querySelectorAll(".hb");
-    for (var i = 0; i < els.length; i++) {
-      var off = parseInt(els[i].dataset.i, 10);
-      els[i].classList.toggle("sel", off >= s && off <= e);
-    }
-  }
-
-  function hexInterpretBytes(bytes) {
-    function u8(off) { return bytes[off]; }
-    function num2(le) { return le ? u8(0) | (u8(1) << 8) : (u8(0) << 8) | u8(1); }
-    function num4(le) { var v = 0; for (var i = 0; i < 4; i++) v = v * 256 + u8(le ? 3 - i : i); return v >>> 0; }
-    function s4(le) { var v = num4(le); return v > 0x7fffffff ? v - 0x100000000 : v; }
-    function f4(le) { var b = new Uint8Array(4); for (var i = 0; i < 4; i++) b[i] = u8(i); return new DataView(b.buffer).getFloat32(0, le); }
-    function f8(le) { var b = new Uint8Array(8); for (var i = 0; i < 8; i++) b[i] = u8(i); return new DataView(b.buffer).getFloat64(0, le); }
-    function u64(le) {
-      if (typeof BigInt === "undefined") return "—";
-      var v = 0n;
-      for (var i = 0; i < 8; i++) v = (v << 8n) | BigInt(u8(le ? 7 - i : i));
-      return v.toString();
-    }
-    function s64(le) {
-      if (typeof BigInt === "undefined") return "—";
-      var v = 0n;
-      for (var i = 0; i < 8; i++) v = (v << 8n) | BigInt(u8(le ? 7 - i : i));
-      var m = 1n << 63n;
-      return (v >= m ? v - (1n << 64n) : v).toString();
-    }
-    var n = bytes.length;
-    var out = [];
-    out.push("U8", bytes.join(", "));
-    out.push("I8", Array.prototype.map.call(bytes, function (b) { return b > 127 ? b - 256 : b; }).join(", "));
-    if (n === 1) out.push("Bits", u8(0).toString(2).padStart(8, "0"));
-    if (n >= 2) {
-      out.push("U16 LE", num2(true));
-      out.push("U16 BE", num2(false));
-      out.push("I16 LE", num2(true) > 32767 ? num2(true) - 65536 : num2(true));
-      out.push("I16 BE", num2(false) > 32767 ? num2(false) - 65536 : num2(false));
-    }
-    if (n >= 4) {
-      out.push("U32 LE", num4(true));
-      out.push("U32 BE", num4(false));
-      out.push("I32 LE", s4(true));
-      out.push("I32 BE", s4(false));
-      out.push("F32 LE", f4(true));
-      out.push("F32 BE", f4(false));
-    }
-    if (n >= 8) {
-      out.push("U64 LE", u64(true));
-      out.push("U64 BE", u64(false));
-      out.push("I64 LE", s64(true));
-      out.push("I64 BE", s64(false));
-      out.push("F64 LE", f8(true));
-      out.push("F64 BE", f8(false));
-    }
-    return out;
-  }
-
-  function renderHexInspector() {
-    if (hexSelStart < 0 || hexSelEnd < 0) { hexInspector.innerHTML = ""; return; }
-    var s = Math.min(hexSelStart, hexSelEnd);
-    var e = Math.max(hexSelStart, hexSelEnd);
-    var n = e - s + 1;
-    var bytes = [];
-    for (var i = s; i <= e; i++) bytes.push(fileBytes[i]);
-    var hexStr = "", asciiStr = "";
-    for (var i = 0; i < n; i++) {
-      var b = bytes[i];
-      hexStr += (b < 16 ? "0" : "") + b.toString(16) + " ";
-      asciiStr += (b >= 32 && b <= 126) ? String.fromCharCode(b) : ".";
-    }
-    var html = '<div class="hi-range">0x' + hex8(s) + " .. 0x" + hex8(e) + "  (" + n + " byte" + (n > 1 ? "s" : "") + ")</div>";
-    html += '<div class="hi-row"><span class="hi-label">Hex</span><span class="hi-val">' + hexStr + "</span></div>";
-    html += '<div class="hi-row"><span class="hi-label">ASCII</span><span class="hi-val">' + asciiStr + "</span></div>";
-    var interp = hexInterpretBytes(bytes);
-    for (var i = 0; i < interp.length; i += 2) {
-      html += '<div class="hi-row"><span class="hi-label">' + interp[i] + '</span><span class="hi-val">' + interp[i + 1] + "</span></div>";
-    }
-    hexInspector.innerHTML = html;
-  }
-
-  function hexDumpByte(e) {
-    var t = e.target;
-    while (t && t !== hexDump && !(t.classList && t.classList.contains("hb"))) t = t.parentNode;
-    if (!t || t === hexDump) return -1;
-    return parseInt(t.dataset.i, 10);
   }
 
   // 码率视图：每帧字节大小柱状图 + 统计
@@ -2324,79 +2019,6 @@ timeline.addEventListener("click", function (e) {
     }, needReset);
   }
 
-  // HDR
-  function renderHdr(h) {
-    hdrInfo.innerHTML = "";
-    function row(k, v) {
-      if (v === undefined || v === null || v === "") return;
-      var d = document.createElement("div");
-      d.className = "kv-row";
-      d.innerHTML = '<span class="k">' + k + '</span><span class="v">' + v + "</span>";
-      hdrInfo.appendChild(d);
-    }
-    function frac(n, d) { return n + "/" + d + " (" + (n / d).toFixed(4) + ")"; }
-    row("Colour primaries", h.colourPrimaries);
-    row("Transfer characteristics", h.transferCharacteristics);
-    row("Matrix coefficients", h.matrixCoefficients);
-    if (h.chromaLocTop !== undefined && h.chromaLocTop !== 0) {
-      row("Chroma loc (top)", h.chromaLocTop);
-      row("Chroma loc (bottom)", h.chromaLocBottom);
-    }
-    row("Full range", h.fullRange);
-    if (h.hasCll) { row("Max CLL", h.maxCll); row("Avg CLL", h.avgCll); }
-    if (h.hasMdi) row("Mastering display", h.masteringDisplay);
-    if (h.hasHdrVivid && h.hdrVivid) {
-      var hv = h.hdrVivid;
-      row("HDR Vivid (CUVA 005.1)", "present (system_start_code=" + hv.systemStartCode + ", windows=" + hv.numWindows + ")");
-      (hv.windows || []).forEach(function (w, wi) {
-        var prefix = hv.numWindows > 1 ? "  win" + wi + " " : "  ";
-        row(prefix + "maxRGB min/avg/var/max",
-          frac(w.minimumMaxrgb, 4095) + "  " + frac(w.averageMaxrgb, 4095) + "  " +
-          frac(w.varianceMaxrgb, 4095) + "  " + frac(w.maximumMaxrgb, 4095));
-        (w.toneMapping || []).forEach(function (tm, ti) {
-          var tp = prefix + "  TM" + ti + " target luminance";
-          row(tp, frac(tm.targetedLuminance, 4095) + " (" + (tm.targetedLuminance / 4095 * 10000).toFixed(0) + " nit)");
-          if (tm.baseEnableFlag) {
-            row(prefix + "  TM" + ti + " base m_p/m_m/m_a/m_b/m_n",
-              frac(tm.baseParamMP, 16383) + " " + frac(tm.baseParamMM, 10) + " " +
-              frac(tm.baseParamMA, 1023) + " " + frac(tm.baseParamMB, 1023) + " " + frac(tm.baseParamMN, 10));
-            row(prefix + "  TM" + ti + " base k1/k2/k3/delta",
-              tm.baseParamK1 + "/" + tm.baseParamK2 + "/" + tm.baseParamK3 + "  delta=" +
-              frac(tm.baseParamDelta, 127) + " mode=" + tm.baseParamDeltaEnableMode);
-          }
-          (tm.threeSpline || []).forEach(function (sp, si) {
-            row(prefix + "  TM" + ti + " 3Spline" + si + " th_enable/d1/d2/str",
-              frac(sp.thEnable, 4095) + " " + frac(sp.thDelta1, 1023) + " " +
-              frac(sp.thDelta2, 1023) + " " + frac(sp.enableStrength, 255) + "  mode=" + sp.thMode);
-          });
-        });
-        if (w.colorSaturationMappingFlag) {
-          row(prefix + "  color saturation gain",
-            (w.colorSaturationGain || []).map(function (g) { return frac(g, 128); }).join("  "));
-        }
-      });
-    }
-  }
-
-  function renderWarnings() {
-    var filter = parseInt(warningFilter.value, 10);
-    var filtered = currentWarnings.filter(function (w) { return filter === -1 || w.type === filter; });
-    warningCount.textContent = "(" + filtered.length + ")";
-    warningBody.innerHTML = "";
-    var frag = document.createDocumentFragment();
-    filtered.forEach(function (w) {
-      var tr = document.createElement("tr");
-      var td0 = document.createElement("td");
-      td0.className = "mono";
-      td0.textContent = hex8(w.position) + " (" + w.position + ")";
-      var td1 = document.createElement("td");
-      td1.textContent = w.message;
-      tr.appendChild(td0); tr.appendChild(td1);
-      frag.appendChild(tr);
-    });
-    warningBody.appendChild(frag);
-  }
-
   function selectNal(index, scrollTo) {
     if (!currentData) return;
     selectedIndex = index;
@@ -2422,7 +2044,7 @@ timeline.addEventListener("click", function (e) {
       }
     }
     renderSyntax(syntaxNode);
-    renderHex(index);
+    HexView.render(fileBytes, currentData.nalus[index]);
 
     if (scrollTo) {
       var pos = filteredPosOf(index);
@@ -2463,7 +2085,7 @@ timeline.addEventListener("click", function (e) {
 
   if (syntaxSearch) syntaxSearch.addEventListener("input", function () { searchSyntaxTree(syntaxSearch.value); });
 
-  warningFilter.addEventListener("change", renderWarnings);
+  warningFilter.addEventListener("change", function () { HdrPanel.renderWarnings(currentWarnings); });
 
   // tab 切换
   var tabSyntax = document.getElementById("tabSyntax");
@@ -2501,28 +2123,23 @@ timeline.addEventListener("click", function (e) {
   tabMediaInfo.addEventListener("click", function () { showTab("mediainfo"); });
 
   // Hex 视图字节选择（类似 imhex 的选中显示解释）
-  hexDump.addEventListener("mousedown", function (e) {
-    var off = hexDumpByte(e);
-    if (off < 0) return;
-    hexDragging = true;
-    hexSelStart = hexSelEnd = off;
-    updateHexSelection();
-    renderHexInspector();
-    e.preventDefault();
-  });
-  hexDump.addEventListener("mousemove", function (e) {
-    if (!hexDragging) return;
-    var off = hexDumpByte(e);
-    if (off < 0) return;
-    hexSelEnd = off;
-    updateHexSelection();
-    renderHexInspector();
-  });
-  document.addEventListener("mouseup", function () {
-    if (hexDragging) {
-      hexDragging = false;
-      renderHexInspector();
-    }
+  HexView.init(hexDump, hexInspector, hex8);
+  HexView.bind();
+
+  // HDR / Warn 面板
+  HdrPanel.init(hdrInfo, warningFilter, warningCount, warningBody, hex8);
+
+  // 导出报告
+  ReportExport.init({
+    get data() { return currentData; },
+    get fileName() { return fileNameEl.textContent; },
+    codecFullName: codecFullName,
+    get codec() { return currentCodec; },
+    chromaFormatName: chromaFormatName,
+    hex8: hex8,
+    get selectedIndex() { return selectedIndex; },
+    fetchNalSyntax: fetchNalSyntax,
+    setStatus: setStatus
   });
 
   previewPlayBtn.addEventListener("click", function () { startPlayback(); });
@@ -2859,8 +2476,8 @@ timeline.addEventListener("click", function (e) {
 
         renderStats(currentData.streamInfo);
         renderNalTable();
-        renderHdr(currentData.hdr);
-        renderWarnings();
+        HdrPanel.renderHdr(currentData.hdr);
+        HdrPanel.renderWarnings(currentWarnings);
         selectedSlice = -1;
         renderTimeline();
         presetPreviewCanvas();
@@ -2884,13 +2501,25 @@ timeline.addEventListener("click", function (e) {
   }
 
   openBtn.addEventListener("click", function () { fileInput.click(); });
-  if (exportBtn) exportBtn.addEventListener("click", exportReport);
+  if (exportBtn) exportBtn.addEventListener("click", function () { ReportExport.run(); });
 
   var compareBtn = document.getElementById("compareBtn");
   var compareInput = document.getElementById("compareInput");
   var compareModal = document.getElementById("compareModal");
   var compareClose = document.getElementById("compareClose");
   var compareBody = document.getElementById("compareBody");
+
+  // 文件对比
+  FileCompare.init({
+    get data() { return currentData; },
+    get codec() { return currentCodec; },
+    parseBuffer: parseBuffer,
+    chromaFormatName: chromaFormatName,
+    compareBody: compareBody,
+    compareModal: compareModal,
+    setStatus: setStatus
+  });
+
   if (compareBtn && compareInput) {
     compareBtn.addEventListener("click", function () {
       if (!currentData) { setStatus("Load a file first to compare"); return; }
@@ -2898,7 +2527,7 @@ timeline.addEventListener("click", function (e) {
     });
     compareInput.addEventListener("change", function () {
       var f = compareInput.files[0];
-      if (f) doCompare(f);
+      if (f) FileCompare.doCompare(f);
       compareInput.value = "";
     });
   }
@@ -3036,8 +2665,7 @@ timeline.addEventListener("click", function (e) {
     bottomPanels.classList.add("hidden");
     resetBtn.classList.add("hidden");
 
-    hexDump.innerHTML = "";
-    hexInspector.innerHTML = "";
+    HexView.clear();
     showTab("syntax");
 
     setStatus("Parser ready (H.264/H.265/H.266). Open or drop a bitstream file.");
