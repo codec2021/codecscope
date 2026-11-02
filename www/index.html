@@ -160,6 +160,8 @@
           <li><b>NAL / OBU Unit List</b> — click a unit to inspect its syntax tree, Hex bytes, and locate the frame on the timeline.</li>
           <li><b>Frame Structure</b> — timeline of slices colored by type (I=red, P=blue, B=green). Click a frame to preview; use <b>Zoom +/-</b> to resize, <b>⏮/⏭</b> to step frame by frame.</li>
           <li><b>Syntax / Preview / Hex</b> tabs — switch between parsed element tree, decoded video preview, and raw bytes.</li>
+          <li><b>Hex byte selection</b> — drag across bytes to inspect them as U8 / I8 / U16 / U32 / U64 / F32 / F64 (little &amp; big endian) plus ASCII.</li>
+          <li><b>HDR Vivid</b> — HEVC SEI (ITU-T T.35, CUVA 005.1) dynamic metadata is parsed per-frame; see the full field tree in the Syntax tab and a readable summary in the HDR panel.</li>
           <li><b>Play</b> — play decoded frames (rate follows the bitstream FPS when available), with progress highlight on the timeline.</li>
           <li><b>MediaInfo</b> tab — container-level metadata (format, duration, bitrate, tracks).</li>
           <li><b>Splitters</b> — drag the divider bars to resize columns / rows.</li>
@@ -171,6 +173,7 @@
           <li>Images: HEIC / HEIF, AVIF, JPEG (EXIF), PNG, GIF, WebP, BMP</li>
           <li>Video decode: WebCodecs (H.264/H.265/VP9) + vvdec WASM (H.266) + dav1d WASM (AV1)</li>
           <li>Image decode: libheif WASM (HEIC) + dav1d WASM (AVIF) + browser-native (JPEG/PNG/…)</li>
+          <li>HDR metadata: HDR10 (mastering display + content light level) and HDR Vivid (CUVA 005.1) dynamic metadata</li>
         </ul>
       </div>
     </div>
