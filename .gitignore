@@ -42,3 +42,6 @@ emsdk/
 *.gif
 *.webp
 *.bmp
+
+# 但保留 README 效果展示截图
+!docs/screenshots/*.png

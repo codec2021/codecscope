@@ -1,5 +1,8 @@
 # CodecScope
 
+[![Live Demo](https://img.shields.io/badge/Live_Demo-打开在线工具-blue?style=for-the-badge)](https://codec2021.github.io/codecscope/)
+[![License](https://img.shields.io/badge/License-GPL_v2-green)](LICENSE)
+
 一个在浏览器中运行的 **H.264 / H.265 / H.266 / AV1 / VP9 视频码流分析工具**，同时支持 **HEIC / AVIF / JPEG / PNG 图片分析**（源自 [HEVCESBrowser](https://github.com/virinext/hevcesbrowser) 的 Web 版）。
 
 复用原项目 `hevcparser` 的 C++ 解析核心，并为 H.264 (AVC)、H.266 (VVC) 分别实现了新解析器，通过 [Emscripten](https://emscripten.org/) 编译为 WebAssembly，前端使用原生 HTML/CSS/JavaScript，可直接用 **GitHub Pages** 免费静态托管，**无需安装、无需后端**，浏览器打开即用。
@@ -21,21 +24,35 @@
 
 码流类型会**自动识别**，无需手动选择。
 
+## 效果展示
+
+主界面（三栏布局：NAL 单元列表 / 语法树 / 帧结构时间轴，底部 HDR·警告面板）：
+
+![CodecScope 主界面](docs/screenshots/home.png)
+
+加载 4K HDR Vivid 视频后的解析效果（自动识别 HEVC，展示 NAL 列表、逐位语法树、I/P/B 时间轴，以及 HDR Vivid CUVA 005.1 动态元数据）：
+
+![解析效果](docs/screenshots/parsed.png)
+
 ## 功能
 
-- **NAL / OBU 单元列表**（虚拟滚动，可流畅处理数万单元的大文件）：偏移、长度、类型、所属帧号和可读信息
-- **语法元素树**：点击任一 NAL/OBU，展示其完整语法元素树（SPS/PPS/VPS/Slice Header、AV1 sequence/frame header、JPEG 标记段等逐位解析）
-- **Hex 视图**：查看选中单元的十六进制 + ASCII 内容
-- **帧结构时间轴**：I/P/B slice 类型的可视化时间轴（GOP 结构），支持缩放、逐帧步进、帧号/POC 标记、播放进度高亮与自动滚动
+- **NAL / OBU 单元列表**（虚拟滚动，可流畅处理数万单元的大文件）：偏移、长度、类型、所属帧号和可读信息，支持按类型过滤
+- **语法元素树**：点击任一 NAL/OBU，展示其完整语法元素树（SPS/PPS/VPS/Slice Header、AV1 sequence/frame header、JPEG 标记段等逐位解析），支持字段搜索
+- **Hex 视图**：查看选中单元的十六进制 + ASCII，**拖选字节显示 U8/I8/U16/U32/U64/F32/F64（大小端）解释**（imhex 风格）
+- **帧结构时间轴**：I/P/B slice 类型的可视化时间轴（GOP 结构），支持缩放、逐帧步进、帧号/POC 标记、参考帧高亮、播放进度高亮与自动滚动
+- **码率图表**：每帧字节大小柱状图 + 统计卡片
 - **码流统计**：单元数量、I/P/B 分布、Profile、Level、Tier、分辨率、真实帧率（FPS）
 - **视频播放**：帧级预览与连续播放，支持**解码顺序 / 显示顺序**切换（正确处理 B 帧重排）、单帧步进、播放进度高亮
-- **容器解封装**：直接拖入 MP4/MOV（AVC/HEVC/VVC/AV1）、WebM、IVF 文件自动解封装
+- **容器解封装**：直接拖入 MP4/MOV（AVC/HEVC/VVC/AV1）、TS、FLV、WebM、IVF 文件自动解封装
 - **MediaInfo 面板**：树状展示完整容器信息（General / Video / Audio / Other 轨道）——格式、时长、码率、编码日期、音频采样率/声道/位深、流大小等，类似 MediaInfo
 - **HEIC/HEIF 图片**：解析 ispe 分辨率 + hvcC 配置 + iloc/iref 图像数据，支持 **libheif WASM 解码预览**，显示 IDR 帧与语法树
 - **AVIF 图片**：解析 ispe + av1C + iloc，支持 **dav1d WASM 解码预览**，显示 OBU 语法树
-- **JPEG 图片**：标记段列表 + 语法树（SOF/DQT/DHT/SOS + EXIF 元数据）
-- **HDR 信息**：色彩原色、传输特性、矩阵系数、CLL、Mastering Display 等（HEVC）
+- **JPEG 图片**：标记段列表 + 语法树（SOF/DQT/DHT/SOS + EXIF 元数据），含 jpegsnoop 风格 quality 估计
+- **HDR 信息**：色彩原色、传输特性、矩阵系数、CLL、Mastering Display（HDR10），以及 **HDR Vivid（CUVA 005.1）动态元数据逐帧解析**
 - **警告面板**：数值越界、引用结构缺失、Profile 一致性检查，支持按类型过滤
+- **多文件对比**：两文件编码参数 / NAL 分布并排对比
+- **导出报告**：一键导出 Markdown 分析报告
+- **插件系统**：自定义 SEI → NAL 解析插件（BitReader），支持启用/禁用/删除，localStorage 持久化
 - **三视图联动**：单元列表 / 时间轴 / 预览画面点击互相同步高亮跳转
 - **可拖拽布局**：各面板大小可拖动调整
 - **移动端适配**：窄屏自动切换为底部导航的堆叠布局
