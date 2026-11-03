@@ -126,7 +126,7 @@
   }
 
   function bind() {
-    dumpEl.addEventListener("mousedown", function (e) {
+    dumpEl.addEventListener("pointerdown", function (e) {
       var off = dumpByte(e);
       if (off < 0) return;
       dragging = true;
@@ -135,7 +135,7 @@
       inspector();
       e.preventDefault();
     });
-    dumpEl.addEventListener("mousemove", function (e) {
+    dumpEl.addEventListener("pointermove", function (e) {
       if (!dragging) return;
       var off = dumpByte(e);
       if (off < 0) return;
@@ -143,7 +143,7 @@
       updateSelection();
       inspector();
     });
-    document.addEventListener("mouseup", function () {
+    document.addEventListener("pointerup", function () {
       if (dragging) {
         dragging = false;
         inspector();

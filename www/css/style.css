@@ -273,7 +273,7 @@ td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
 .hex-offset { color: var(--text-dim); }
 .hex-byte { color: #e0e0e0; }
 .hex-ascii { color: #7ec8ff; }
-.hb { display: inline-block; width: 2ch; margin-right: 1ch; text-align: center; cursor: crosshair; border-radius: 2px; }
+.hb { display: inline-block; width: 2ch; margin-right: 1ch; text-align: center; cursor: crosshair; border-radius: 2px; touch-action: none; }
 .hb:hover { background: rgba(255,255,255,.12); }
 .hb.sel { background: var(--accent); color: #fff; }
 .hb-pad { cursor: default; }
