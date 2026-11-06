@@ -2345,6 +2345,26 @@ timeline.addEventListener("click", function (e) {
           imageH = heic.picHeight || 0;
           srcNote = " (HEIC image)";
         } else if (H26xDemux.isMp4(rawBytes)) {
+          var vp9mp4 = H26xDemux.demuxVp9Mp4(rawBytes);
+          if (vp9mp4 && vp9mp4.frames && vp9mp4.frames.length) {
+            fileBytes = rawBytes;
+            currentDescription = null;
+            currentNalLengthSize = 4;
+            currentContainerInfo = null;
+            currentVp9Frames = vp9mp4.frames;
+            currentVp9Profile = vp9mp4.profile || 0;
+            currentVp9BitDepth = vp9mp4.bitDepth || 8;
+            srcNote = " (VP9 MP4)";
+            result = {
+              codec: "vp9",
+              data: {
+                nalus: vp9mp4.units.map(function (u) { return { offset: u.offset, length: u.length, type: u.type, typeName: u.typeName, info: u.info, color: u.color, sliceType: (u.sliceType !== undefined ? u.sliceType : -1), frameType: u.frameType, jpegSyntax: u.syntax }; }),
+                streamInfo: { nalus: vp9mp4.units.length, slices: vp9mp4.frames.length, i: 0, p: 0, b: 0, profile: "VP9", level: "-", picWidth: vp9mp4.width, picHeight: vp9mp4.height },
+                hdr: {},
+                warnings: []
+              }
+            };
+          } else {
           var av1mp4 = H26xDemux.demuxAv1Mp4(rawBytes);
           if (av1mp4 && av1mp4.frames && av1mp4.frames.length) {
             fileBytes = rawBytes;
@@ -2373,6 +2393,7 @@ timeline.addEventListener("click", function (e) {
             currentNalLengthSize = demuxed.nalLengthSize || 4;
             currentContainerInfo = H26xDemux.parseContainerInfo(rawBytes);
             srcNote = " (MP4 demuxed)";
+          }
           }
         } else if (H26xDemux.isTs(rawBytes)) {
           var ts = H26xDemux.demuxTs(rawBytes);

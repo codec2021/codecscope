@@ -93,3 +93,41 @@ test("parseTsInfo parses PAT/PMT", () => {
   assert.strictEqual(info.streams[0].handler, "vide");
   assert.strictEqual(info.streams[0].codec, "avc1");
 });
+
+test("splitVp9Superframe 拆分 2 帧 superframe", () => {
+  // 2 个 frame + superframe index（marker 0xc1 = 0xc0 | (lengthSize-1=0)<<3 | (nbFrames-1=1)）
+  const d = new Uint8Array([
+    0xAA, 0xBB, 0xCC,          // frame 0（3 字节）
+    0xDD, 0xEE,                // frame 1（2 字节）
+    0xC1,                      // marker 副本
+    0x03, 0x02,                // frame sizes：3、2（各 1 字节 little-endian）
+    0xC1                       // marker（最后 1 字节）
+  ]);
+  const frames = H.splitVp9Superframe(d);
+  assert.strictEqual(frames.length, 2);
+  assert.strictEqual(frames[0].offset, 0);
+  assert.deepStrictEqual(Array.from(frames[0].data), [0xAA, 0xBB, 0xCC]);
+  assert.strictEqual(frames[1].offset, 3);
+  assert.deepStrictEqual(Array.from(frames[1].data), [0xDD, 0xEE]);
+});
+
+test("splitVp9Superframe 非 superframe 返回单帧", () => {
+  const d = new Uint8Array([0xAA, 0xBB, 0xCC, 0xDD]);
+  const frames = H.splitVp9Superframe(d);
+  assert.strictEqual(frames.length, 1);
+  assert.strictEqual(frames[0].offset, 0);
+  assert.strictEqual(frames[0].data.length, 4);
+});
+
+test("splitVp9Superframe 无效 index 退回单帧", () => {
+  // marker 声明 2 帧，但 size 总和不等于 index 之前的数据长度
+  const d = new Uint8Array([
+    0xAA, 0xBB, 0xCC, 0xDD, 0xEE, // 5 字节 frame 数据
+    0xC1,                          // marker 副本
+    0x01, 0x01,                    // 声明 sizes 1、1（总和 2 != 5）
+    0xC1
+  ]);
+  const frames = H.splitVp9Superframe(d);
+  assert.strictEqual(frames.length, 1);
+  assert.strictEqual(frames[0].data.length, 9);
+});

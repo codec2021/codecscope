@@ -434,6 +434,39 @@
     }
     return { tree: tree, profile: profile, frameType: frameType, width: width, height: height, bitDepth: bitDepth };
   }
+
+  // VP9 superframe 拆分（参考 ffmpeg vp9_superframe_split）
+  function splitVp9Superframe(sample) {
+    var size = sample.length;
+    if (size < 2) return [{ offset: 0, data: sample }];
+    var marker = sample[size - 1];
+    if ((marker & 0xe0) !== 0xc0) return [{ offset: 0, data: sample }];
+    var lengthSize = 1 + ((marker >> 3) & 0x3);
+    var nbFrames = 1 + (marker & 0x7);
+    var idxSize = 2 + nbFrames * lengthSize;
+    if (size < idxSize) return [{ offset: 0, data: sample }];
+    if (sample[size - idxSize] !== marker) return [{ offset: 0, data: sample }];
+
+    var sizes = [];
+    var total = 0;
+    var p = size - idxSize + 1;
+    for (var i = 0; i < nbFrames; i++) {
+      var frameSize = 0;
+      for (var j = 0; j < lengthSize; j++) frameSize |= sample[p++] << (j * 8);
+      if (frameSize <= 0 || total + frameSize > size - idxSize) return [{ offset: 0, data: sample }];
+      sizes.push(frameSize);
+      total += frameSize;
+    }
+    if (total !== size - idxSize) return [{ offset: 0, data: sample }];
+
+    var frames = [];
+    var pos = 0;
+    for (var i2 = 0; i2 < nbFrames; i2++) {
+      frames.push({ offset: pos, data: sample.subarray(pos, pos + sizes[i2]) });
+      pos += sizes[i2];
+    }
+    return frames;
+  }
   function boxSize(d, o) {
     var size = readU32(d, o);
     if (size === 1) {
@@ -750,6 +783,105 @@
     }
 
     return { codec: "av1", frames: frames, obus: obus, width: picW, height: picH, profile: profile, level: level };
+  }
+
+  function demuxVp9Mp4(d) {
+    var moov = null, i = 0;
+    while (i + 8 <= d.length) {
+      var msize = boxSize(d, i);
+      if (msize < 8 || i + msize > d.length) break;
+      if (fourCC(d, i + 4) === "moov") { moov = { offset: i + 8, end: i + msize }; break; }
+      i += msize;
+    }
+    if (!moov) return null;
+
+    var trakStart = moov.offset;
+    var stsd = null, stsz = null, stsc = null, stco = null;
+    while (trakStart + 8 <= moov.end && !stsd) {
+      var trakSize = boxSize(d, trakStart);
+      if (trakSize < 8) break;
+      if (fourCC(d, trakStart + 4) === "trak") {
+        var trakEnd = trakStart + trakSize;
+        var mdia = findBox(d, trakStart + 8, trakEnd, "mdia");
+        if (mdia) {
+          var hdlr = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "hdlr");
+          if (hdlr && fourCC(d, hdlr.offset + 16) === "vide") {
+            var minf = findBox(d, mdia.offset + 8, mdia.offset + mdia.size, "minf");
+            if (minf) {
+              var stbl = findBox(d, minf.offset + 8, minf.offset + minf.size, "stbl");
+              if (stbl) {
+                stsd = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsd");
+                stsz = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsz");
+                stsc = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stsc");
+                stco = findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "stco") || findBox(d, stbl.offset + 8, stbl.offset + stbl.size, "co64");
+              }
+            }
+          }
+        }
+      }
+      trakStart += trakSize;
+    }
+    if (!stsd || !stsz || !stco) return null;
+    var fmt = fourCC(d, stsd.offset + 20);
+    if (fmt !== "vp09" && fmt !== "vp08") return null;
+
+    var sampleSizes = [];
+    var uniformSize = readU32(d, stsz.offset + 12);
+    var szCount = readU32(d, stsz.offset + 16);
+    if (uniformSize > 0) { for (var s1 = 0; s1 < szCount; s1++) sampleSizes.push(uniformSize); }
+    else { for (var s2 = 0; s2 < szCount; s2++) sampleSizes.push(readU32(d, stsz.offset + 20 + s2 * 4)); }
+
+    var chunkOffsets = [];
+    var coCount = readU32(d, stco.offset + 12);
+    var co64 = fourCC(d, stco.offset + 4) === "co64";
+    for (var c1 = 0; c1 < coCount; c1++) {
+      if (co64) chunkOffsets.push(readU32(d, stco.offset + 16 + c1 * 8) * 4294967296 + readU32(d, stco.offset + 20 + c1 * 8));
+      else chunkOffsets.push(readU32(d, stco.offset + 16 + c1 * 4));
+    }
+
+    var stscEntries = [];
+    if (stsc) {
+      var scCount = readU32(d, stsc.offset + 12);
+      for (var sc = 0; sc < scCount; sc++) stscEntries.push({ firstChunk: readU32(d, stsc.offset + 16 + sc * 12), samplesPerChunk: readU32(d, stsc.offset + 20 + sc * 12) });
+    } else stscEntries.push({ firstChunk: 1, samplesPerChunk: 1 });
+
+    var sampleOffsets = [];
+    var sampleIndex = 0, chunkIndex = 0, dataOffset = 0;
+    while (sampleIndex < sampleSizes.length && chunkIndex < chunkOffsets.length) {
+      var spc = 1;
+      for (var e = 0; e < stscEntries.length; e++) if (stscEntries[e].firstChunk <= chunkIndex + 1) spc = stscEntries[e].samplesPerChunk;
+      for (var k = 0; k < spc && sampleIndex < sampleSizes.length; k++) { sampleOffsets.push(chunkOffsets[chunkIndex] + dataOffset); dataOffset += sampleSizes[sampleIndex]; sampleIndex++; }
+      chunkIndex++; dataOffset = 0;
+    }
+
+    var frames = [], units = [];
+    var picW = 0, picH = 0, profile = 0, bitDepth = 8;
+    for (var si2 = 0; si2 < sampleOffsets.length; si2++) {
+      var off = sampleOffsets[si2], len = sampleSizes[si2];
+      if (off < 0 || off + len > d.length) continue;
+      var sample = d.subarray(off, off + len);
+      var frameList = splitVp9Superframe(sample);
+      for (var f = 0; f < frameList.length; f++) {
+        var fr = frameList[f];
+        var absOff = off + fr.offset;
+        frames.push({ data: fr.data, absOff: absOff });
+        var vhdr = parseVp9FrameHdr(d, absOff, absOff + fr.data.length);
+        if (vhdr.width && !picW) { picW = vhdr.width; picH = vhdr.height; }
+        if (!profile && vhdr.profile) { profile = vhdr.profile; bitDepth = vhdr.bitDepth || 8; }
+        var ft = vhdr.frameType;
+        var ftName = ft === 0 ? "VP9_KEY_FRAME" : (ft === 1 ? "VP9_INTER_FRAME" : "VP9_SHOW_EXISTING");
+        units.push({
+          offset: absOff, length: fr.data.length, type: ft, typeName: ftName,
+          info: ft === 0 ? "Key frame" : (ft === 1 ? "Inter frame" : "Show existing frame"),
+          color: ft === 0 ? "#CD9B1D" : "#4d94e8",
+          sliceType: ft === 0 ? 2 : (ft === 1 ? 0 : -1),
+          frameType: ft,
+          syntax: { n: ftName, c: vhdr.tree }
+        });
+      }
+    }
+
+    return { codec: "vp9", frames: frames, units: units, width: picW, height: picH, profile: profile, bitDepth: bitDepth };
   }
 
   // ---------- MPEG-TS (Transport Stream) ----------
@@ -1829,6 +1961,8 @@
     parseIvf: parseIvf,
     parseAv1Obus: parseAv1Obus,
     demuxAv1Mp4: demuxAv1Mp4,
+    demuxVp9Mp4: demuxVp9Mp4,
+    splitVp9Superframe: splitVp9Superframe,
     isWebm: isWebm,
     demuxWebm: demuxWebm,
     isTs: isTs,
