@@ -316,12 +316,12 @@ td.mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
 @media (max-width: 768px) {
   html, body { height: 100%; }
 
-  .topbar { flex-wrap: wrap; justify-content: flex-start; padding: 8px 10px; }
-  .topbar h1 { font-size: 15px; flex: 1 1 100%; margin: 0 0 6px; }
+  .topbar { flex-wrap: wrap; justify-content: flex-start; padding: 6px 10px; }
+  .topbar h1 { font-size: 14px; flex: 0 0 auto; margin: 0 8px 0 0; }
+  .codec-badge, .version-badge { display: none; }
   .header-actions { flex-wrap: wrap; width: 100%; }
-  .header-actions > * { margin: 0 6px 6px 0; }
-  .header-actions .btn { padding: 6px 12px; font-size: 13px; }
-  .header-actions .file-name { flex: 1 1 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .header-actions .btn { padding: 5px 10px; font-size: 12px; margin: 0 6px 6px 0; }
+  .header-actions .file-name { flex: 1 1 100%; max-width: 100%; margin: 0 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* 三栏 → 上下堆叠，通过底部导航切换视图 */
   .main-area {
