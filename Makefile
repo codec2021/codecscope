@@ -1,5 +1,5 @@
 CXX ?= clang++
-CXXFLAGS ?= -std=c++11 -O2 -Wall -MMD -MP
+CXXFLAGS ?= -std=c++11 -O2 -Wall -MMD -MP -DNDEBUG
 EMCC ?= em++
 
 INC := -Isrc/hevcparser/include -Isrc/hevcparser/src -Isrc/h264parser/include -Isrc/h264parser/src -Isrc/vvcparser/include -Isrc/vvcparser/src -Isrc/common -Isrc/web

@@ -1529,7 +1529,6 @@ RefPicListModification HevcParserImpl::processRefPicListModification(BitstreamRe
 
   if(!m_ppsMap[pslice -> slice_pic_parameter_set_id])
   {
-    assert(0);
     return res;
   }
 
@@ -1537,7 +1536,6 @@ RefPicListModification HevcParserImpl::processRefPicListModification(BitstreamRe
 
   if(!m_spsMap[spsId])
   {
-    assert(0);
     return res;
   }
 

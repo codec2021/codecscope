@@ -24,7 +24,7 @@ mkdir -p dist
 
 em++ src/hevcparser/src/*.cpp src/h264parser/src/*.cpp src/vvcparser/src/*.cpp src/common/*.cpp src/web/*.cpp \
   -Isrc/hevcparser/include -Isrc/hevcparser/src -Isrc/h264parser/include -Isrc/h264parser/src -Isrc/vvcparser/include -Isrc/vvcparser/src -Isrc/common -Isrc/web \
-  -std=c++11 -O2 \
+  -std=c++11 -O2 -DNDEBUG \
   -s WASM=1 \
   -s ALLOW_MEMORY_GROWTH=1 \
   -s EXPORTED_FUNCTIONS='["_hevc_parse","_hevc_get_nal_syntax","_hevc_reset","_avc_parse","_avc_get_nal_syntax","_avc_reset","_vvc_parse","_vvc_get_nal_syntax","_vvc_reset","_detect_codec","_hevc_free","_malloc","_free"]' \
