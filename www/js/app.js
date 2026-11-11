@@ -79,6 +79,7 @@
 
   function setStatus(msg) { statusEl.textContent = msg; }
   function hex8(v) { var s = v.toString(16); while (s.length < 8) s = "0" + s; return "0x" + s; }
+  function setPreviewMsg(msg, isError) { previewMsg.textContent = msg; previewMsg.classList.toggle("error", !!isError); }
 
   // ---------- WASM 封装 ----------
   function parseBuffer(bytes, hintCodec) {
@@ -1093,7 +1094,7 @@ timeline.addEventListener("click", function (e) {
         }));
         play.feedFrame = fi;
       } catch (err) {
-        previewMsg.textContent = "Decode error: " + err.message;
+        setPreviewMsg("Decode error: " + err.message, true);
         stopPlayback();
         return;
       }
@@ -1104,7 +1105,7 @@ timeline.addEventListener("click", function (e) {
 
   function initPlayDecoder(done, needReset) {
     var cs = codecString();
-    if (!cs) { previewMsg.textContent = "Unable to determine codec string"; return; }
+    if (!cs) { setPreviewMsg("Unable to determine codec string", true); return; }
     var conf = { codec: cs, optimizeForLatency: true };
     if (currentDescription) conf.description = currentDescription;
 
@@ -1144,7 +1145,7 @@ timeline.addEventListener("click", function (e) {
           output: function (frame) { play.frames[frame.timestamp] = frame; },
           error: function (err) {
             if (play.decoder !== dec) return; // 僵尸 decoder 忽略
-            previewMsg.textContent = "Decode error: " + err.message;
+            setPreviewMsg("Decode error: " + err.message, true);
             stopPlayback();
           }
         });
@@ -1156,7 +1157,7 @@ timeline.addEventListener("click", function (e) {
 
     if (cachedCodecSupport && cachedCodecSupport.cs === cs) {
       if (!cachedCodecSupport.supported) {
-        previewMsg.textContent = "Browser does not support decoding " + cs;
+        setPreviewMsg("Browser does not support decoding " + cs, true);
         return;
       }
       createDecoder();
@@ -1169,12 +1170,12 @@ timeline.addEventListener("click", function (e) {
       cachedCodecSupport = { cs: cs, supported: support.supported };
       if (!currentData || !currentCodec) return; // 文件已切换
       if (!support.supported) {
-        previewMsg.textContent = "Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : "");
+        setPreviewMsg("Browser does not support decoding " + cs + (currentCodec === "hevc" ? " (H.265 may be restricted by hardware/licensing)" : ""), true);
         return;
       }
       createDecoder();
     }).catch(function (err) {
-      previewMsg.textContent = "Config error: " + err.message;
+      setPreviewMsg("Config error: " + err.message, true);
     });
   }
 
@@ -1314,7 +1315,7 @@ timeline.addEventListener("click", function (e) {
     if (kf < 0) {
       // 目标帧之前没有关键帧（如 TS 流开头缺 SPS/PPS/IDR）：从第一个关键帧开始播放
       kf = (timeline._keyFrames && timeline._keyFrames.length > 0) ? timeline._keyFrames[0] : -1;
-      if (kf < 0) { previewMsg.textContent = "Key frame not found"; return; }
+      if (kf < 0) { setPreviewMsg("Key frame not found", true); return; }
       fi = kf;
     }
     buildPlayOrder();
@@ -1330,7 +1331,7 @@ timeline.addEventListener("click", function (e) {
         play.curFrame = fi;
       }
       previewPlayBtn.textContent = "⏸ Pause";
-      previewMsg.textContent = "";
+      setPreviewMsg("");
       resetPlayProgress(frames[fi].first);
       feedFrames(fi);      var iv = 40;
       if (currentData && currentData.streamInfo) {
@@ -1565,7 +1566,7 @@ timeline.addEventListener("click", function (e) {
       vvdecPlay.cts = 0;
       vvdecPlay.active = true;
       previewPlayBtn.textContent = "⏸ Pause";
-      previewMsg.textContent = "";
+      setPreviewMsg("");
       resetPlayProgress(timeline._frames && timeline._frames.length ? timeline._frames[0].first : -1);
 
       var iv = 33;
@@ -1613,7 +1614,7 @@ timeline.addEventListener("click", function (e) {
       var frames = timeline._frames;
       if (!frames || frames.length === 0) return;
       var keyFi = findKeyFrame(fi);
-      if (keyFi < 0) { previewMsg.textContent = "Key frame not found"; return; }
+    if (keyFi < 0) { setPreviewMsg("Key frame not found", true); return; }
 
       var targetLastSlice = frames[fi].last;
       var targetLastNal = timeline._slices[targetLastSlice].index;
@@ -1703,7 +1704,7 @@ timeline.addEventListener("click", function (e) {
     c.height = Math.max(1, Math.round(img.height * scale));
     c.getContext("2d").drawImage(tmp, 0, 0, c.width, c.height);
     previewHint.textContent = "Frame " + img.width + " x " + img.height + " (VVC)";
-    previewMsg.textContent = "";
+    setPreviewMsg("");
     previewCanvasTouched = true;
     if (sliceIndex >= 0) {
       updatePlayProgress(sliceIndex);
@@ -1769,7 +1770,7 @@ timeline.addEventListener("click", function (e) {
     c.height = Math.max(1, Math.round(img.height * scale));
     c.getContext("2d").drawImage(tmp, 0, 0, c.width, c.height);
     previewHint.textContent = "Frame " + (frameIdx !== undefined ? frameIdx : "?") + " (" + img.width + " x " + img.height + ", AV1)";
-    previewMsg.textContent = "";
+    setPreviewMsg("");
     previewCanvasTouched = true;
     if (frameIdx !== undefined && timeline._slices && timeline._frames) {
       var f = timeline._frames[frameIdx];
@@ -1789,7 +1790,7 @@ timeline.addEventListener("click", function (e) {
       av1Play.frameIdx = 0;
       av1Play.active = true;
       previewPlayBtn.textContent = "⏸ Pause";
-      previewMsg.textContent = "";
+      setPreviewMsg("");
       resetPlayProgress(timeline._frames && timeline._frames.length ? timeline._frames[0].first : -1);
       var iv = 33;
       if (currentData && currentData.streamInfo) {
@@ -1891,7 +1892,7 @@ timeline.addEventListener("click", function (e) {
         canvas.height = Math.max(1, Math.round(h * scale));
         canvas.getContext("2d").drawImage(tmpCanvas, 0, 0, canvas.width, canvas.height);
         previewHint.textContent = "Image " + w + " x " + h;
-        previewMsg.textContent = "";
+        setPreviewMsg("");
         previewCanvasTouched = true;
         heicDecoding = false;
       });
@@ -1912,7 +1913,7 @@ timeline.addEventListener("click", function (e) {
       if (heicDecoding) return;
       heicDecoding = true;
       previewHint.textContent = "Decoding image...";
-      previewMsg.textContent = "";
+      setPreviewMsg("");
       if (currentAv1Frames && currentAv1Frames.length) {
         heicDecoding = false;
         decodeAv1Frame(0);
@@ -1923,7 +1924,7 @@ timeline.addEventListener("click", function (e) {
           createImageBitmap(currentImageBlob).then(function (bmp) {
             drawVideoFrame(bmp);
             previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
-            previewMsg.textContent = "";
+            setPreviewMsg("");
             heicDecoding = false;
           }).catch(function () { loadAndDecodeHeic(); });
         } else {
@@ -1933,7 +1934,7 @@ timeline.addEventListener("click", function (e) {
         createImageBitmap(currentImageBlob).then(function (bmp) {
           drawVideoFrame(bmp);
           previewHint.textContent = "Image " + bmp.width + " x " + bmp.height;
-          previewMsg.textContent = "";
+          setPreviewMsg("");
           heicDecoding = false;
         }).catch(function () {
           previewMsg.textContent = "Failed to decode image";
@@ -1953,7 +1954,7 @@ timeline.addEventListener("click", function (e) {
       var afi0 = frameIndexOfSlice(sliceIndex);
       if (afi0 < 0) afi0 = 0;
       if (play.active || vvdecPlay.active || av1Play.active) stopPlayback();
-      previewMsg.textContent = "";
+      setPreviewMsg("");
       previewHint.textContent = "Decoding AV1...";
       decodeAv1Frame(afi0);
       return;
@@ -1964,13 +1965,13 @@ timeline.addEventListener("click", function (e) {
       var fi0 = frameIndexOfSlice(sliceIndex);
       if (fi0 < 0) fi0 = 0;
       if (play.active || vvdecPlay.active) stopPlayback();
-      previewMsg.textContent = "";
+      setPreviewMsg("");
       previewHint.textContent = "Decoding VVC...";
       decodeVvcFrame(fi0);
       return;
     }
     if (!("VideoDecoder" in window)) {
-      previewMsg.textContent = "Browser does not support WebCodecs";
+      setPreviewMsg("Browser does not support WebCodecs", true);
       return;
     }
     if (play.active || vvdecPlay.active) stopPlayback();
@@ -1993,7 +1994,7 @@ timeline.addEventListener("click", function (e) {
 
     var pf = frames[fi];
     previewHint.textContent = "Decoding... (POC " + (pf ? pf.poc : "?") + ")";
-    previewMsg.textContent = "";
+    setPreviewMsg("");
 
     initPlayDecoder(function () {
       if (needReset) play.feedFrame = keyFi - 1;
@@ -2013,7 +2014,7 @@ timeline.addEventListener("click", function (e) {
         waited += 10;
         if (waited > PLAY_PREVIEW_TIMEOUT) {
           clearInterval(check);
-          if (!previewMsg.textContent) previewMsg.textContent = "Decode timeout";
+          if (!previewMsg.textContent) setPreviewMsg("Decode timeout", true);
         }
       }, 10);
     }, needReset);
